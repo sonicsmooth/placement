@@ -11,8 +11,9 @@ import numpy as np
 from numbers import Number
 import random
 from functools import reduce
+import copy
 
-def matrix_to_deg(m):
+def xfrm_to_deg(m):
     # https://math.stackexchange.com/questions/13150/extracting-rotation-scale-values-from-2d-transformation-matrix
     a,c,b,d,tx,ty = m.to_values()
     return np.degrees(np.arctan2(-b,a))
@@ -143,8 +144,14 @@ class Shape:
         self.transform = transforms.Affine2D.from_values(a,b,c,d,*val)
         self._compute_points()
     def rotate(self, val: float):
-        # do something with matrix, rotate by degrees
+        # Rotate by degrees
         # Todo: add optional argument for xy position to rotate around
+        self.transform.rotate_deg(val)
+        self._compute_points()
+    def rotate_to(self, val: float):
+        # Undo the previous rotation
+        oldrot = xfrm_to_deg(self.transform)
+        self.transform.rotate_deg(-oldrot)
         self.transform.rotate_deg(val)
         self._compute_points()
     
@@ -157,8 +164,8 @@ class Rectangle(Shape):
         Shape.__init__(self)
         if args and isinstance(args[0], xy) and isinstance(args[1], wh):
             # given xy and wh directly
-            self._xy = args[0]
-            self._wh = args[1]
+            self._xy = copy.copy(args[0])
+            self._wh = copy.copy(args[1])
         if args and isinstance(args[0], wh):
             # given only wh directly
             if 'centered' in kwargs and kwargs['centered']:
@@ -187,8 +194,9 @@ class Rectangle(Shape):
             self._wh = wh(args[0], args[1])
         elif args and isinstance(args[0], Rectangle):
             # given another rectangle directly
-            self._xy = args[0].xy
-            self._wh = args[0].wh
+            self._xy = copy.copy(args[0].xy)
+            self._wh = copy.copy(args[0].wh)
+            self.transform = args[0].transform.frozen()
         elif 'xy' in kwargs and 'wh' in kwargs:
             # given pos and wh in dict
             self._xy = xy(*kwargs['xy'])
@@ -212,7 +220,7 @@ class Rectangle(Shape):
         assert hasattr(self, '_wh')
         self._compute_points()
     def _compute_points(self):       
-        self.matrix = np.matrix(self.tuples).transpose()
+        self.matrix = np.matrix(self.corners).transpose()
         self.matrix = np.insert(self.matrix, [2], 1, axis=0)
         self.matrix = self.transform.get_matrix() * self.matrix
     def draw(self, ax: plt.Axes, xfrm=transforms.Affine2D()):
@@ -306,7 +314,7 @@ class Rectangle(Shape):
         return np.min(pts)
     @property
     def top(self):
-        # Return minimum y value after transform
+        # Return maximum y value after transform
         pts = self.points
         pts = pts[:,1]
         return np.max(pts)
@@ -319,39 +327,34 @@ class Rectangle(Shape):
         arr = arr[0:2, :].transpose() # throw away bottom row and get N x 2
         return arr
     @property
-    def tuples(self):
+    def corners(self):
         # Returns pairs of points before transform
         return ((self.x,              self.y),
                 (self.x + self.width, self.y),
                 (self.x + self.width, self.y + self.height),
                 (self.x,              self.y + self.height))
 
-
 class RectPin:
     def __init__(self, dims=wh(1.0,1.0), pos=xy(0.0, 0.0), name='pin'):
         self.rect = Rectangle(wh=wh(dims), centered=True, patchargs={'color':'red', 'alpha':0.5})
         self.rect.translate(xy(pos))
         self.name = name
+        self.bbox = Rectangle(self.rect)
     def __repr__(self):
-        return f'RectPin({self.rect.width}, {self.rect.height})'
+        return f'RectPin({self.rect.width}, {self.rect.height}, {self.rect.transform.get_matrix()})'
     def translate(self, val: xy):
         self.rect.translate(val)
+        self.bbox.translate(val)
     def rotate(self, val: float):
         self.rect.rotate(val)
-    def _center_offset(self):
-        return xy(self.rect.wh / 2.0)
-    @property
-    def bbox(self):
-        _cos = self._center_offset()
-        pos = matrix_to_pos(self.rect.transform)
-        return Rectangle(pos - _cos, self.rect.wh)
+        self.bbox.rotate(val)
     def draw(self, ax, xfrm=transforms.Affine2D()):
         # xfrm is parent's translation and rotation
         self.rect.draw(ax, xfrm)
         localxfrm = self.rect.transform + xfrm
         pos = localxfrm.to_values()[-2:]
-        rot = matrix_to_deg(localxfrm)
-        #ax.text(*pos, s=self.name, va='center', ha='center', rotation=rot, clip_on=True)
+        rot = xfrm_to_deg(localxfrm)
+        ax.text(*pos, s=self.name, va='center', ha='center', rotation=rot, clip_on=True)
 
 class Circle(Shape):
     """A Circle is by definition centered around its own origin, 
@@ -372,7 +375,7 @@ class Circle(Shape):
     def r(self, val):
         self.dia = val * 2.0
     def _compute_points(self):       
-        self.matrix = np.matrix(self.tuples).transpose()
+        self.matrix = np.matrix(self.corners).transpose()
         self.matrix = np.insert(self.matrix, [2], 1, axis=0)
         self.matrix = self.transform.get_matrix() * self.matrix
     def draw(self, ax: plt.Axes, xfrm=transforms.Affine2D()):
@@ -393,7 +396,7 @@ class Circle(Shape):
         arr = arr[0:2, :].transpose() # throw away bottom row and get N x 2
         return arr
     @property
-    def tuples(self):
+    def corners(self):
         # Returns pairs of points before transform
         return ((0.0, 0.0),)
 
@@ -405,29 +408,23 @@ class CircPin:
         self.circ = Circle(dia, patchargs={'color':'red', 'alpha':0.5})
         self.circ.translate(xy(pos))
         self.name = name
+        self.bbox = Rectangle(pos.x-self.r, pos.y-self.r, dia, dia)
     def __repr__(self):
         return f'CircPin({self.dia})'
     def translate(self, val: xy):
         # Move the circle
         self.circ.translate(val)
+        self.bbox.translate(val)
     def rotate(self, val: xy):
         # Yes a circle can rotate if it's not at the origin
         self.circ.rotate(val)
-    def _center_offset(self):
-        return xy(self.circ.r, self.circ.r)
-    # TODO: either cache pin bbox each time the transform changes
-    # TODO: or compute the package bbox each time the property is called
-    @property
-    def bbox(self):
-        _cos = self._center_offset()
-        pos = matrix_to_pos(self.circ.transform)
-        return Rectangle(pos - _cos, wh(self.circ.dia, self.circ.dia))
+        self.bbox.rotate(val)
     def draw(self, ax: plt.Axes, xfrm=transforms.Affine2D()):
         # xfrm is parent's translation and rotation
         self.circ.draw(ax, xfrm)
         localxfrm = self.circ.transform + xfrm
         pos = localxfrm.to_values()[-2:]
-        rot = matrix_to_deg(localxfrm)
+        rot = xfrm_to_deg(localxfrm)
         #ax.text(*pos, s=self.name, va='center', ha='center', rotation=rot, clip_on=True)
 
 packspecs = {
@@ -448,7 +445,8 @@ packspecs = {
 class Package:
     def __init__(self, name, pos=xy(0.0, 0.0), rot=0.0): #name, body, pins, bbox):
         self.name = name
-
+        self.pos = pos
+        self.rot = rot
         pdict = packspecs[name]
         majordim = pdict['W']
         minordim = pdict['H']
@@ -467,25 +465,25 @@ class Package:
             self.pins.extend(make_quad_pins(**pindims))
         elif ptype == 'ball-array':
             self.pins.extend(make_regular_ball_array(**pindims))
-
-        #self.clean_bbox = make_bounding_box(self.body, self.pins)
         self.bbox = make_bounding_box(self.body, self.pins)
         self.rotate(rot)
         self.translate(pos)
-        # self.bbox.rotate(rot)
-        # self.bbox.translate(pos)
-
-
-    def translate(self, val: float):
-        # Add val to translation
+    def translate(self, val: xy):
+        self.pos = self.pos + val
         self.body.translate(val)
         self.bbox.translate(val)
     def translate_to(self, val: xy):
+        self.pos = val
         self.body.translate_to(val)
         self.bbox.translate_to(val)
     def rotate(self, val: float):
+        self.rot = self.rot + val
         self.body.rotate(val)
         self.bbox.rotate(val)
+    def rotate_to(self, val: float):
+        self.rot = self.rot
+        self.body.rotate_to(val)
+        self.bbox.rotate_to(val)
     def draw(self, ax: plt.Axes, xfrm=transforms.Affine2D()):
         # Generally for packages, the built-in transform is contained
         # in the body (self.body.transform) and is the "true" position 
@@ -497,7 +495,7 @@ class Package:
         self.body.draw(ax, xfrm)
         localxfrm = self.body.transform + xfrm
         #pos = localxfrm.to_values()[-2:]
-        #rot = matrix_to_deg(localxfrm)
+        #rot = xfrm_to_deg(localxfrm)
         #ax.text(*pos, s=self.name, va='center', ha='center', rotation=rot, clip_on=True)
         # TODO: Add refdes
 
@@ -533,7 +531,7 @@ def make_dual_pins(inner, outer, minordim, numpins=2, minorpitch=0.0):
     dim = wh(majordim, minordim)
     for i in range(1, numpins+1):
         left = i<=numpins/2 # heading down or up
-        vi = i if left else numpins-i+1
+        vi = i if left else numpins-i+1 # virtual-i
         majorpos = -majorpitch/2.0 if left else majorpitch/2.0
         minorpos = minorpitch * (numpins/4 - vi + 0.5)
         pos = xy(majorpos, minorpos)
@@ -542,16 +540,65 @@ def make_dual_pins(inner, outer, minordim, numpins=2, minorpitch=0.0):
 
 def make_quad_pins(inner, outer, minordim, numpins, minorpitch):
     """ Same as make_dual_pins, except expects each argument to be a 2-tuple or 2-list
-        """
-    #Todo: fix pin numbering, so it's continuous from 1 thru numpins
-    #Todo: this causes bug in bounding box since bbox is made from 
-    #Todo: unrotated rectangles
-    pins0 = make_dual_pins(inner[0], outer[0], minordim[0], numpins[0], minorpitch[0])
-    pins1 = make_dual_pins(inner[1], outer[1], minordim[1], numpins[1], minorpitch[1])
-    for p in pins1:
-        p.rotate(90)
-    
-    return pins0+pins1
+    Assume same number of pins left and right, and same number of pin top and bottom,
+    so numpins = [n1, n2], where n1 is total pins shared between left and right, and
+    n2 is total pins shared between top and bottom.  So n1 and n2 must be 0 or an even
+    number.  This function becomes the equivalent of make_dual_pins if the top and bottom
+    numpins are zero. """
+
+    assert(len(inner) == 2)
+    assert(len(outer) == 2)
+    assert(len(minordim) == 2)
+    assert(len(numpins) == 2)
+    assert(len(minorpitch) == 2)
+    assert(outer[0] > inner[0])
+    assert(outer[1] > inner[1])
+    assert(numpins[0] % 2 == 0)
+    assert(numpins[1] % 2 == 0)
+
+    # Four loops in pin order
+    lrqty = numpins[0]//2
+    tbqty = numpins[1]//2
+    pins = []
+    left   = range(1, lrqty+1)
+    bottom = range(lrqty+1, lrqty+tbqty+1)
+    right  = range(lrqty+tbqty+1, numpins[0]+tbqty+1)
+    top    = range(numpins[0]+tbqty+1, numpins[0]+numpins[1]+1)
+
+    majordim = (outer[0] - inner[0]) / 2.0      # width of pad along main orientation
+    majorpitch = inner[0] + majordim            # ctr-ctr distance between pads along main orientation
+    dim = wh(majordim, minordim[0])
+    for i in left:
+        majorpos = -majorpitch/2.0
+        minorpos = minorpitch[0] * (lrqty/2 - i + 0.5)
+        pos = xy(majorpos, minorpos)
+        pins.append(RectPin(dim, pos, name=f'{i}'))
+
+    for i in right:
+        vi = numpins[0] + tbqty - i + 1 # virtual-i
+        majorpos = majorpitch/2.0
+        minorpos = minorpitch[0] * (lrqty/2 - vi + 0.5)
+        pos = xy(majorpos, minorpos)
+        pins.append(RectPin(dim, pos, name=f'{i}'))
+
+    majordim = (outer[1] - inner[1]) / 2.0      # width of pad along main orientation
+    majorpitch = inner[1] + majordim            # ctr-ctr distance between pads along main orientation
+    dim = wh(minordim[1], majordim)
+    for i in bottom:
+        vi = i - lrqty
+        majorpos = -majorpitch/2.0
+        minorpos = minorpitch[1] * (vi - tbqty/2.0 - 0.5 )
+        pos = xy(minorpos, majorpos)
+        pins.append(RectPin(dim, pos, name=f'{i}'))
+
+    for i in top:
+        vi = numpins[0] + numpins[1] - i + 1 # virtual-i
+        majorpos = majorpitch/2.0
+        minorpos = minorpitch[1] * (vi - tbqty/2.0 - 0.5)
+        pos = xy(minorpos, majorpos)
+        pins.append(RectPin(dim, pos, name=f'{i}'))
+
+    return  pins
 
 def num_to_letter(i, minpos=1):
     # Return A-Z, AA-AZ, BA-BZ, etc.
@@ -576,10 +623,10 @@ def make_regular_ball_array(rows, cols, pitch, dia):
 def union_box(box1: Rectangle, box2: Rectangle) -> Rectangle:
     """Returns the rectangle that is the bounding box of the two given rectangles.
     This doesn't take into consideration any rotation that may be applied to the rectangles"""
-    left  = min(box1.x, box2.x)
-    right = max(box1.x + box1.width, box2.x + box2.width)
-    bot   = min(box1.y, box2.y)
-    top   = max(box1.y + box1.height, box2.y + box2.height)
+    left  = min(box1.left,   box2.left)
+    right = max(box1.right,  box2.right)
+    bot   = min(box1.bottom, box2.bottom)
+    top   = max(box1.top,    box2.top)
     return Rectangle(left, bot, right - left, top - bot, patchargs={'color':'green', 'alpha':0.5, 'fill':None})
 
 def make_bounding_box(body: Rectangle, pins: list) -> Rectangle:
@@ -602,8 +649,8 @@ def bbox_intersect(r1: Rectangle, r2: Rectangle) -> bool:
                 |--------| -> false
     anything else -> true for each axis
     """
-    # rot1 = matrix_to_deg(r1.transform)
-    # rot2 = matrix_to_deg(r2.transform)
+    # rot1 = xfrm_to_deg(r1.transform)
+    # rot2 = xfrm_to_deg(r2.transform)
     # assert(rot1 % 90 == 0)
     # assert(rot2 % 90 == 0)
 
@@ -628,10 +675,6 @@ def bbox_intersect(r1: Rectangle, r2: Rectangle) -> bool:
     # A negative value means this edge doesn't overlap
     # TODO: Check this
     return [r2.left-r1.right, r1.left-r2.right, r2.top-r1.bottom, r2.bottom-r1.top]
-
-
-
-                    #rot=ru(-45,45))
 
 def make_packages(qty=1, minpins=2, maxpins=10):
     """Generate random packages.  Return iterable"""
@@ -668,8 +711,7 @@ def clr_plot(ax):
     # ax.set_ylim(-20,20)
     ax.set_aspect('equal')
     ax.autoscale(True)
-    ax.grid('both')
-
+    #ax.grid('both')
 
 def randomize_packages(packages: list) -> None:
     for p in packages:
@@ -682,7 +724,6 @@ def draw_packages(ax: plt.Axes, packages: list) -> None:
         package.draw(ax)
     plt.pause(0.0001)
     plt.draw()
-
 
 def packages_intersect(packages: list) -> bool:
     result = False
@@ -704,38 +745,35 @@ def compact_packages(packages: list)-> None:
 
 if __name__ == '__main__':
 
-    #packages = make_packages(2)
+    #packages = make_packages(5)
 
-    packages=(Package('RCMF0805', pos=xy(0.0,   0.0), rot=0),
-              Package('LT4312f',  pos=xy(3.5,   2.0), rot=0))
+    packages=(Package('LPS22DF', pos=xy(0.0,   0.0), rot=0),
+              Package('LT4312f',  pos=xy(3.5,   2.0), rot=0),
+              Package('SX9376',  pos=xy(2.5,   0.0), rot=0),
+               )
     
     ax = plt.axes()
 
     # for i in range(200):
-    #randomize_packages(packages)
-    draw_packages(ax, packages)
-    while (packages_intersect(packages)):
-        clr_plot(ax)
-        ax.text(0,0,packages_intersect(packages))
-        pb = make_packages_bbox(packages)
-        pb.draw(ax)
-        draw_packages(ax, packages)
-        #separate_packages(packages)
-        # compact_packages(packages)
-        # clr_plot(ax)
-        # draw_packages(ax, packages)
-        plt.pause(1)
+    positions = []
+    randomize_packages(packages)
+    # rpos = 
+
     clr_plot(ax)
-    ax.text(0,0,packages_intersect(packages))
     draw_packages(ax, packages)
+    while (True):
+        if not packages_intersect(packages):
+            break
+        separate_packages(packages)
+        clr_plot(ax)
+        draw_packages(ax, packages)
 
-    # for i,p in enumerate(packages):
-    #     print(i)
-    #     print(p.body)
+        #compact_packages(packages)
+        # clr_plot(ax)
+        #plt.pause(0.25) 
 
-    x = 5
-
-
+    clr_plot(ax)
+    draw_packages(ax, packages)
 
     plt.show()
 
