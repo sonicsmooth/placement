@@ -408,7 +408,7 @@ class CircPin:
         self.circ = Circle(dia, patchargs={'color':'red', 'alpha':0.5})
         self.circ.translate(xy(pos))
         self.name = name
-        self.bbox = Rectangle(pos.x-self.r, pos.y-self.r, dia, dia)
+        self.bbox = Rectangle(pos.x-self.circ.r, pos.y-self.circ.r, dia, dia)
     def __repr__(self):
         return f'CircPin({self.dia})'
     def translate(self, val: xy):
@@ -425,7 +425,7 @@ class CircPin:
         localxfrm = self.circ.transform + xfrm
         pos = localxfrm.to_values()[-2:]
         rot = xfrm_to_deg(localxfrm)
-        #ax.text(*pos, s=self.name, va='center', ha='center', rotation=rot, clip_on=True)
+        ax.text(*pos, s=self.name, va='center', ha='center', rotation=rot, clip_on=True)
 
 packspecs = {
     'RCMF01005': {'W': 0.4,   'H': 0.2,   'pintype': 'two-pin-passive', 'pindims': {'inner': 0.2,         'outer': 0.5,        'minordim': 0.2}},
@@ -600,21 +600,34 @@ def make_quad_pins(inner, outer, minordim, numpins, minorpitch):
 
     return  pins
 
-def num_to_letter(i, minpos=1):
-    # Return A-Z, AA-AZ, BA-BZ, etc.
-    # minpos is minimum number of positions to show
-    # eg if i=5 and minpos=2, then output is 'AE'
-    # Todo: Make this work
-    # For now, just A-Z
-    return chr( i % 26 + 65)
+def num_to_letter(n, minpos=1):
+    """convert positive decimal integer n to equivalent in another base (2-36).
+    From https://stackoverflow.com/questions/2267362/how-to-convert-an-integer-to-a-string-in-any-base
+    """
+
+    digits = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    base = 26
+    s = ""
+    while 1:
+        r = n % base
+        s = digits[r] + s
+        n = n // base
+        if n == 0:
+            break
+    if len(s) < minpos:
+        s = 'A' * (minpos - len(s)) + s
+    return s
 
 def make_regular_ball_array(rows, cols, pitch, dia):
+    import math
     posx = pitch_to_offset(pitch, cols)
     posy = pitch_to_offset(pitch, rows)
+    num_letters = int(math.log(rows, 26)) + 1
+    num_digits  = int(math.log(cols, 10)) + 1
     pinout = []
     for row in range(rows):
         for col in range(cols):
-            name = f'{num_to_letter(row)}{col}'
+            name = f'{num_to_letter(row, num_letters)}{col:0{num_digits}d}'
             pos = xy(col * pitch + posx, -(row * pitch + posy))
             pin = CircPin(dia, pos=pos, name=name)
             pinout.append(pin)
@@ -747,16 +760,18 @@ if __name__ == '__main__':
 
     #packages = make_packages(5)
 
-    packages=(Package('LPS22DF', pos=xy(0.0,   0.0), rot=0),
-              Package('LT4312f',  pos=xy(3.5,   2.0), rot=0),
-              Package('SX9376',  pos=xy(2.5,   0.0), rot=0),
+    packages=(
+        # Package('LPS22DF', pos=xy(0.0,   0.0), rot=0),
+        #       Package('LT4312f',  pos=xy(3.5,   2.0), rot=0),
+        #       Package('SX9376',  pos=xy(2.5,   0.0), rot=0),
+              Package('SLG51001',  pos=xy(2.5,   0.0), rot=0),
                )
     
     ax = plt.axes()
 
     # for i in range(200):
     positions = []
-    randomize_packages(packages)
+    #randomize_packages(packages)
     # rpos = 
 
     clr_plot(ax)
