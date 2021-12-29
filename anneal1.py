@@ -354,7 +354,7 @@ class RectPin:
         localxfrm = self.rect.transform + xfrm
         pos = localxfrm.to_values()[-2:]
         rot = xfrm_to_deg(localxfrm)
-        ax.text(*pos, s=self.name, va='center', ha='center', rotation=rot, clip_on=True)
+        #ax.text(*pos, s=self.name, va='center', ha='center', rotation=rot, clip_on=True)
 
 class Circle(Shape):
     """A Circle is by definition centered around its own origin, 
@@ -425,7 +425,7 @@ class CircPin:
         localxfrm = self.circ.transform + xfrm
         pos = localxfrm.to_values()[-2:]
         rot = xfrm_to_deg(localxfrm)
-        ax.text(*pos, s=self.name, va='center', ha='center', rotation=rot, clip_on=True)
+        #ax.text(*pos, s=self.name, va='center', ha='center', rotation=rot, clip_on=True)
 
 packspecs = {
     'RCMF01005': {'W': 0.4,   'H': 0.2,   'pintype': 'two-pin-passive', 'pindims': {'inner': 0.2,         'outer': 0.5,        'minordim': 0.2}},
@@ -720,16 +720,16 @@ def make_packages(qty=1, minpins=2, maxpins=10):
 
 def clr_plot(ax):
     plt.cla()
-    # ax.set_xlim(-20,20)
-    # ax.set_ylim(-20,20)
+    ax.set_xlim(-100, 100)
+    ax.set_ylim(-100, 100)
     ax.set_aspect('equal')
-    ax.autoscale(True)
+    #ax.autoscale(True)
     #ax.grid('both')
 
 def randomize_packages(packages: list) -> None:
     for p in packages:
-        rx = random.uniform(0, 2)
-        ry = random.uniform(0, 2)
+        rx = random.uniform(-5, 5)
+        ry = random.uniform(-5, 5)
         p.translate_to(xy(rx, ry))
 
 def draw_packages(ax: plt.Axes, packages: list) -> None:
@@ -739,53 +739,60 @@ def draw_packages(ax: plt.Axes, packages: list) -> None:
     plt.draw()
 
 def packages_intersect(packages: list) -> bool:
-    result = False
+    result = set()
     for p1 in packages:
         for p2 in packages:
             iter_val = bbox_intersect(p1.bbox, p2.bbox)
-            if iter_val: return True
-    return False
+            if iter_val: 
+                result.add(p1)
+                result.add(p2)
+
+    return result or False
 
 def separate_packages(packages: list) -> None:
-    for p in packages:
-        rx = random.uniform(-0.5, 0.5)
-        ry = random.uniform(-0.5, 0.5)
-        p.translate(xy(rx, ry))
-    pass
+    rpos = [pkg.pos for pkg in packages]
+    centroidx = np.average([p.x for p in rpos])
+    centroidy = np.average([p.y for p in rpos])
+    centroid = xy(centroidx, centroidy)
+
+    for pkg in packages:
+        ctrvec = pkg.pos - centroid
+        pkg.translate(ctrvec * 0.5)
 
 def compact_packages(packages: list)-> None:
     pass
 
 if __name__ == '__main__':
 
-    #packages = make_packages(5)
+    packages = make_packages(100)
 
-    packages=(
-        # Package('LPS22DF', pos=xy(0.0,   0.0), rot=0),
-        #       Package('LT4312f',  pos=xy(3.5,   2.0), rot=0),
-        #       Package('SX9376',  pos=xy(2.5,   0.0), rot=0),
-              Package('SLG51001',  pos=xy(2.5,   0.0), rot=0),
-               )
+    # packages=(
+    #           Package('LPS22DF', pos=xy(0.0,   0.0), rot=0),
+    #           Package('LT4312f',  pos=xy(3.5,   2.0), rot=0),
+    #           Package('SX9376',  pos=xy(2.5,   0.0), rot=0),
+    #           Package('SLG51001',  pos=xy(2.5,   0.0), rot=0),
+    #            )
     
     ax = plt.axes()
 
     # for i in range(200):
     positions = []
-    #randomize_packages(packages)
-    # rpos = 
+    randomize_packages(packages)
 
-    clr_plot(ax)
-    draw_packages(ax, packages)
+    # clr_plot(ax)
+    # draw_packages(ax, packages)
+
     while (True):
-        if not packages_intersect(packages):
-            break
-        separate_packages(packages)
+        xsect = packages_intersect(packages) 
+        if not xsect: break
+        separate_packages(xsect)
+
         clr_plot(ax)
         draw_packages(ax, packages)
 
         #compact_packages(packages)
         # clr_plot(ax)
-        #plt.pause(0.25) 
+        #plt.pause(0.05) 
 
     clr_plot(ax)
     draw_packages(ax, packages)
