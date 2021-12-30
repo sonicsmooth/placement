@@ -84,6 +84,13 @@ class xy:
         self.y = tmp
     def swap_new(self):
         return xy(self.y, self.x)
+    def mag(self):
+        return np.sqrt(self.x**2 + self.y**2)
+    def magsquared(self):
+        return self.x**2 + self.y**2
+    def norm(self):
+        m = self.mag()
+        return xy(self.x / m, self.y / m)
 
 class wh:
     def __init__(self, *args, **kwargs):
@@ -333,6 +340,8 @@ class Rectangle(Shape):
                 (self.x + self.width, self.y),
                 (self.x + self.width, self.y + self.height),
                 (self.x,              self.y + self.height))
+    def area(self):
+        return self._wh.w * self._wh.h
 
 class RectPin:
     def __init__(self, dims=wh(1.0,1.0), pos=xy(0.0, 0.0), name='pin'):
@@ -445,8 +454,8 @@ packspecs = {
 class Package:
     def __init__(self, name, pos=xy(0.0, 0.0), rot=0.0): #name, body, pins, bbox):
         self.name = name
-        self.pos = pos
-        self.rot = rot
+        self.pos = xy(0.0, 0.0)
+        self.rot = 0.0 # <-- these update in the initial rotate and translate below
         pdict = packspecs[name]
         majordim = pdict['W']
         minordim = pdict['H']
@@ -718,18 +727,11 @@ def make_packages(qty=1, minpins=2, maxpins=10):
     #         Package('LPS22DF'  , pos=xy(12.0,  7.0), rot=random.uniform(-2,2)),
     #         Package('SLG51001' , pos=xy(10.0, 10.0), rot=random.uniform(-2,2)))
 
-def clr_plot(ax):
-    plt.cla()
-    ax.set_xlim(-100, 100)
-    ax.set_ylim(-100, 100)
-    ax.set_aspect('equal')
-    #ax.autoscale(True)
-    #ax.grid('both')
 
 def randomize_packages(packages: list) -> None:
     for p in packages:
-        rx = random.uniform(-5, 5)
-        ry = random.uniform(-5, 5)
+        rx = random.uniform(-1, 1)
+        ry = random.uniform(-1, 1)
         p.translate_to(xy(rx, ry))
 
 def draw_packages(ax: plt.Axes, packages: list) -> None:
@@ -739,6 +741,8 @@ def draw_packages(ax: plt.Axes, packages: list) -> None:
     plt.draw()
 
 def packages_intersect(packages: list) -> bool:
+    # Returns the set of packages that have at least one
+    # overlap with another package
     result = set()
     for p1 in packages:
         for p2 in packages:
@@ -749,29 +753,94 @@ def packages_intersect(packages: list) -> bool:
 
     return result or False
 
-def separate_packages(packages: list) -> None:
+def separate_packages1(packages: list) -> None:
+    # Move packages outward along the vector from the centroid
     rpos = [pkg.pos for pkg in packages]
     centroidx = np.average([p.x for p in rpos])
     centroidy = np.average([p.y for p in rpos])
     centroid = xy(centroidx, centroidy)
-
     for pkg in packages:
         ctrvec = pkg.pos - centroid
-        pkg.translate(ctrvec * 0.5)
+        pkg.translate(ctrvec)
+
+def separate_packages2(packages: list) -> None:
+    # Move packages by repulsive field
+    rpos = [pkg.pos for pkg in packages]
+    k = 0.1
+    for pkg1 in packages:
+        pkg1force = []
+        for pkg2 in packages:
+            if pkg1 is pkg2: continue
+            ptdiff = pkg1.pos - pkg2.pos
+            normvec = ptdiff / ptdiff.mag()
+            pushvec = (normvec / ptdiff.magsquared()) * pkg2.bbox.area()
+            pkg1force.append(pushvec)
+        xforce = k * np.sum([f.x for f in pkg1force])
+        yforce = k * np.sum([f.y for f in pkg1force])
+        pkg1.translate(xy(xforce, yforce))
+
+def separate_packages3(packages: list) -> None:
+    # Move packages by overlap
+    for pkg1 in packages:
+        for pkg2 in packages:
+            if pkg1 is pkg2: continue
+            ovl = bbox_intersect(pkg1.bbox, pkg2.bbox)
+            if ovl is None: continue
+            print(ovl)
+
 
 def compact_packages(packages: list)-> None:
-    pass
+    # Move packages by attractive springs (proportional to distance)
+    # Moving by attractive gravity (proportional to 1/distance ^2) wasn't as well behaved
+    rpos = [pkg.pos for pkg in packages]
+    k = 0.005
+    translations = {}
+    for pkg1 in packages:
+        pkg1force = []
+        for pkg2 in packages:
+            if pkg1 is pkg2: continue
+            # if packages_intersect([pkg1, pkg2]):
+            #     pkg1force.append(xy(0.0,0.0))
+            #     continue
+            ptdiff = pkg1.pos - pkg2.pos
+            if ptdiff.mag():
+                # normvec = ptdiff.norm()
+                # pushvec = (normvec / ptdiff.magsquared()) * pkg2.bbox.area()
+                # pushvec = pushvec * (-k)
+                pushvec = ptdiff * (-k)
+            else:
+                pushvec = xy(0.0, 0.0)
+            pkg1force.append(pushvec)
+        xforce = np.sum([f.x for f in pkg1force])
+        yforce = np.sum([f.y for f in pkg1force])
+        force = xy(xforce, yforce)
+        translations[pkg1] = copy.copy(force)
+    totalxlate = 0.0
+    for pkg, xlate in translations.items():
+        pkg.translate(xlate)
+        totalxlate = totalxlate + xlate.mag()
+    return totalxlate
+    
+
+def clr_plot(ax):
+    plt.cla()
+    ax.set_xlim(-25, 25)
+    ax.set_ylim(-25, 25)
+    #ax.autoscale(True)
+    ax.set_aspect('equal')
+    #ax.grid('both')
 
 if __name__ == '__main__':
 
-    packages = make_packages(100)
+    packages = make_packages(50)
 
     # packages=(
-    #           Package('LPS22DF', pos=xy(0.0,   0.0), rot=0),
-    #           Package('LT4312f',  pos=xy(3.5,   2.0), rot=0),
-    #           Package('SX9376',  pos=xy(2.5,   0.0), rot=0),
-    #           Package('SLG51001',  pos=xy(2.5,   0.0), rot=0),
-    #            )
+    #             Package('LPS22DF', pos=xy(-5,   0.0), rot=0),
+    #             Package('LPS22DF', pos=xy(5,   0.0), rot=0),
+    #             Package('LT4312f',  pos=xy(8.5,   2.0), rot=0),
+    #            Package('SX9376',  pos=xy(2.5,   0.0), rot=0),
+    #            Package('SLG51001',  pos=xy(2.5,   0.0), rot=0),
+    #             )
     
     ax = plt.axes()
 
@@ -779,20 +848,22 @@ if __name__ == '__main__':
     positions = []
     randomize_packages(packages)
 
-    # clr_plot(ax)
-    # draw_packages(ax, packages)
-
+    clr_plot(ax)
+    draw_packages(ax, packages)
+    i = 0
     while (True):
         xsect = packages_intersect(packages) 
         if not xsect: break
-        separate_packages(xsect)
-
+        separate_packages2(xsect)
         clr_plot(ax)
         draw_packages(ax, packages)
+        
 
-        #compact_packages(packages)
-        # clr_plot(ax)
-        #plt.pause(0.05) 
+    xltmag = 1000.0
+    while (xltmag > 0.001):
+        xltmag = compact_packages(packages)
+        clr_plot(ax)
+        draw_packages(ax, packages)
 
     clr_plot(ax)
     draw_packages(ax, packages)
