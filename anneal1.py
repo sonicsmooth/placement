@@ -6,6 +6,7 @@ from matplotlib.figure import Figure
 from matplotlib import pyplot as plt
 from matplotlib import patches
 from matplotlib import transforms
+from matplotlib.backend_bases import MouseButton
 from pprint import pprint
 import numpy as np
 from numbers import Number
@@ -442,14 +443,15 @@ packspecs = {
     'RCMF0402':  {'W': 1.0,   'H': 0.5,   'pintype': 'two-pin-passive', 'pindims': {'inner': 0.5,         'outer': 1.5,        'minordim': 0.6}},
     'RCMF0603':  {'W': 1.55,  'H': 0.8,   'pintype': 'two-pin-passive', 'pindims': {'inner': 0.8,         'outer': 2.1,        'minordim': 0.9}},
     'RCMF0805':  {'W': 2.0,   'H': 1.25,  'pintype': 'two-pin-passive', 'pindims': {'inner': 1.2,         'outer': 3.0,        'minordim': 1.3}},
-    # 'RCMF1206':  {'W': 3.2,   'H': 1.6,   'pintype': 'two-pin-passive', 'pindims': {'inner': 2.2,         'outer': 4.2,        'minordim': 1.6}},
-    # 'RCMF1210':  {'W': 3.2,   'H': 2.5,   'pintype': 'two-pin-passive', 'pindims': {'inner': 2.2,         'outer': 4.2,        'minordim': 2.8}},
-    # 'RCMF2010':  {'W': 5.0,   'H': 2.5,   'pintype': 'two-pin-passive', 'pindims': {'inner': 3.5,         'outer': 6.1,        'minordim': 2.8}},
-    # 'RCMF2512':  {'W': 6.3,   'H': 3.2,   'pintype': 'two-pin-passive', 'pindims': {'inner': 4.9,         'outer': 8.0,        'minordim': 3.5}},
+    'RCMF1206':  {'W': 3.2,   'H': 1.6,   'pintype': 'two-pin-passive', 'pindims': {'inner': 2.2,         'outer': 4.2,        'minordim': 1.6}},
+    'RCMF1210':  {'W': 3.2,   'H': 2.5,   'pintype': 'two-pin-passive', 'pindims': {'inner': 2.2,         'outer': 4.2,        'minordim': 2.8}},
+    'RCMF2010':  {'W': 5.0,   'H': 2.5,   'pintype': 'two-pin-passive', 'pindims': {'inner': 3.5,         'outer': 6.1,        'minordim': 2.8}},
+    'RCMF2512':  {'W': 6.3,   'H': 3.2,   'pintype': 'two-pin-passive', 'pindims': {'inner': 4.9,         'outer': 8.0,        'minordim': 3.5}},
     'LT4312f' :  {'W': 3.0,   'H': 4.0392,'pintype': 'dual-row-ic',     'pindims': {'inner': 3.2,         'outer': 5.23,       'minordim': 0.305,       'numpins': 16,     'minorpitch': 0.5        }},
     'SX9376'  :  {'W': 1.8,   'H': 1.9,   'pintype': 'quad-row-ic',     'pindims': {'inner': (1.1, 1.0),  'outer': (2.3, 2.2), 'minordim': (0.2, 0.2),  'numpins':  [6,6], 'minorpitch': (0.4, 0.4) }},
     'LPS22DF' :  {'W': 2.0,   'H': 2.0,   'pintype': 'quad-row-ic',     'pindims': {'inner': (1.25,1.25), 'outer': (2.3,2.3),  'minordim': (0.25,0.25), 'numpins':  [6,4], 'minorpitch': (0.5,0.5)  }},
-    'SLG51001':  {'W': 1.675, 'H': 1.675, 'pintype': 'ball-array',      'pindims': {'rows': 4, 'cols': 4, 'pitch': 0.4, 'dia': 0.27}}}
+    'SLG51001':  {'W': 1.675, 'H': 1.675, 'pintype': 'ball-array',      'pindims': {'rows': 4, 'cols': 4, 'pitch': 0.4, 'dia': 0.27}}
+    }
 
 class Package:
     def __init__(self, name, pos=xy(0.0, 0.0), rot=0.0): #name, body, pins, bbox):
@@ -477,6 +479,8 @@ class Package:
         self.bbox = make_bounding_box(self.body, self.pins)
         self.rotate(rot)
         self.translate(pos)
+    def __repr__(self):
+        return f'Package({self.name},{self.pos})'
     def translate(self, val: xy):
         self.pos = self.pos + val
         self.body.translate(val)
@@ -692,11 +696,35 @@ def bbox_intersect(r1: Rectangle, r2: Rectangle) -> bool:
 
     # Some overlap must exist
     # Return the amount of overlap as [left, right, bottom, top]
-    # where the value indicates the amount that r1 overlaps with the 
-    # left, right, bottom, top of r2.  A positive means overlap.
-    # A negative value means this edge doesn't overlap
-    # TODO: Check this
-    return [r2.left-r1.right, r1.left-r2.right, r2.top-r1.bottom, r2.bottom-r1.top]
+    # where the value indicates the amount that the given edge of 
+    # r1 overlaps into r2.
+    
+    retval = []
+    # left edge of r1 inside r2
+    if r2.left < r1.left < r2.right:
+        retval.append(r1.left - r2.left) # a positive number
+    else:
+        retval.append(None)
+    
+    # right edge of r1 inside r2
+    if r2.left < r1.right < r2.right:
+        retval.append(r1.right - r2.left)
+    else:
+        retval.append(None)
+
+    # bottom edge of r1 inside r2
+    if r2.bottom < r1.bottom < r2.top:
+        retval.append(r1.bottom - r2.bottom)
+    else:
+        retval.append(None)
+
+    # top edge of r1 inside r2
+    if r2.bottom < r1.top < r2.top:
+        retval.append(r1.top - r2.bottom)
+    else:
+        retval.append(None)
+
+    return retval
 
 def make_packages(qty=1, minpins=2, maxpins=10):
     """Generate random packages.  Return iterable"""
@@ -750,7 +778,6 @@ def packages_intersect(packages: list) -> bool:
             if iter_val: 
                 result.add(p1)
                 result.add(p2)
-
     return result or False
 
 def separate_packages1(packages: list) -> None:
@@ -779,42 +806,49 @@ def separate_packages2(packages: list) -> None:
         yforce = k * np.sum([f.y for f in pkg1force])
         pkg1.translate(xy(xforce, yforce))
 
-def separate_packages3(packages: list) -> None:
+def separate_packages3(packages: list, moved: dict = {}) -> None:
     # Move packages by overlap
     for pkg1 in packages:
         for pkg2 in packages:
             if pkg1 is pkg2: continue
             ovl = bbox_intersect(pkg1.bbox, pkg2.bbox)
-            if ovl is None: continue
-            print(ovl)
+            if not ovl: continue
+            olist = [o for o in ovl if o]
+            if not olist: continue
+            mv = min(olist)
+            if   ovl[0] == mv: amt = xy(-mv, 0.0)
+            elif ovl[1] == mv: amt = xy( mv, 0.0)
+            elif ovl[2] == mv: amt = xy(0.0, -mv)
+            elif ovl[3] == mv: amt = xy(0.0,  mv)
+            if pkg2 in moved:
+                newiter = moved[pkg2][1] + 1
+                newamt = amt + xy(random.uniform(-0.1,0.1), random.uniform(-0.1,0.1)) * newiter
+                moved[pkg2] = [newamt, newiter]
+            else:
+                moved[pkg2] = [amt, 1]
+            pkg2.translate(moved[pkg2][0])
+    return moved
+
 
 
 def compact_packages(packages: list)-> None:
     # Move packages by attractive springs (proportional to distance)
     # Moving by attractive gravity (proportional to 1/distance ^2) wasn't as well behaved
     rpos = [pkg.pos for pkg in packages]
-    k = 0.005
+    k = 0.001
     translations = {}
     for pkg1 in packages:
         pkg1force = []
         for pkg2 in packages:
             if pkg1 is pkg2: continue
-            # if packages_intersect([pkg1, pkg2]):
-            #     pkg1force.append(xy(0.0,0.0))
-            #     continue
             ptdiff = pkg1.pos - pkg2.pos
-            if ptdiff.mag():
-                # normvec = ptdiff.norm()
-                # pushvec = (normvec / ptdiff.magsquared()) * pkg2.bbox.area()
-                # pushvec = pushvec * (-k)
-                pushvec = ptdiff * (-k)
-            else:
-                pushvec = xy(0.0, 0.0)
+            pushvec = ptdiff * (-k) * pkg2.bbox.area()
             pkg1force.append(pushvec)
         xforce = np.sum([f.x for f in pkg1force])
         yforce = np.sum([f.y for f in pkg1force])
         force = xy(xforce, yforce)
         translations[pkg1] = copy.copy(force)
+    
     totalxlate = 0.0
     for pkg, xlate in translations.items():
         pkg.translate(xlate)
@@ -824,46 +858,67 @@ def compact_packages(packages: list)-> None:
 
 def clr_plot(ax):
     plt.cla()
-    ax.set_xlim(-25, 25)
-    ax.set_ylim(-25, 25)
+    ax.set_xlim(-40, 40)
+    ax.set_ylim(-40, 40)
     #ax.autoscale(True)
     ax.set_aspect('equal')
     #ax.grid('both')
 
+def on_move(event):
+    # get the x and y pixel coords
+    x, y = event.x, event.y
+    if event.inaxes:
+        ax = event.inaxes  # the axes instance
+        print('data coords %f %f' % (event.xdata, event.ydata))
+
+bindind_id = None
+def on_click(event):
+    if event.button is MouseButton.LEFT:
+        print('disconnecting callback')
+        plt.disconnect(binding_id)
+
 if __name__ == '__main__':
 
-    packages = make_packages(50)
+    packages = make_packages(10)
 
     # packages=(
-    #             Package('LPS22DF', pos=xy(-5,   0.0), rot=0),
-    #             Package('LPS22DF', pos=xy(5,   0.0), rot=0),
-    #             Package('LT4312f',  pos=xy(8.5,   2.0), rot=0),
-    #            Package('SX9376',  pos=xy(2.5,   0.0), rot=0),
+    #              Package('LPS22DF', pos=xy(-0.5,   0.0), rot=0),
+    #              Package('LPS22DF', pos=xy(0.5,   0.0), rot=0),
+    #              Package('LT4312f',  pos=xy(-0.0,  0.0), rot=0),
+                 # Package('SX9376',  pos=xy(2.5,   0.0), rot=0),
     #            Package('SLG51001',  pos=xy(2.5,   0.0), rot=0),
     #             )
     
     ax = plt.axes()
 
-    # for i in range(200):
+    binding_id = plt.connect('motion_notify_event', on_move)
+    plt.connect('button_press_event', on_click)
+
     positions = []
     randomize_packages(packages)
 
     clr_plot(ax)
     draw_packages(ax, packages)
+    #plt.pause(1)
     i = 0
-    while (True):
+    moved_history = {}
+    print('starting')
+    while (i < 100):
         xsect = packages_intersect(packages) 
         if not xsect: break
-        separate_packages2(xsect)
+    #   print(f'i={i}, intersection qty={len(xsect)}')
+        moved_history = separate_packages3(xsect, moved_history)
         clr_plot(ax)
         draw_packages(ax, packages)
+        i += 1
         
+    print('done',i)
 
-    xltmag = 1000.0
-    while (xltmag > 0.001):
-        xltmag = compact_packages(packages)
-        clr_plot(ax)
-        draw_packages(ax, packages)
+    # xltmag = 1000.0
+    # while (xltmag > 0.001):
+    #     xltmag = compact_packages(packages)
+    #     clr_plot(ax)
+    #     draw_packages(ax, packages)
 
     clr_plot(ax)
     draw_packages(ax, packages)
