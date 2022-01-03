@@ -13,6 +13,7 @@ from numbers import Number
 import random
 from functools import reduce
 import copy
+from ordered_set_37 import OrderedSet
 
 def xfrm_to_deg(m):
     # https://math.stackexchange.com/questions/13150/extracting-rotation-scale-values-from-2d-transformation-matrix
@@ -702,7 +703,7 @@ def bbox_intersect(r1: Rectangle, r2: Rectangle) -> bool:
     retval = []
     # left edge of r1 inside r2
     if r2.left < r1.left < r2.right:
-        retval.append(r1.left - r2.left) # a positive number
+        retval.append(r2.right - r1.left) # a positive number
     else:
         retval.append(None)
     
@@ -714,7 +715,7 @@ def bbox_intersect(r1: Rectangle, r2: Rectangle) -> bool:
 
     # bottom edge of r1 inside r2
     if r2.bottom < r1.bottom < r2.top:
-        retval.append(r1.bottom - r2.bottom)
+        retval.append(r2.top - r1.bottom)
     else:
         retval.append(None)
 
@@ -771,7 +772,7 @@ def draw_packages(ax: plt.Axes, packages: list) -> None:
 def packages_intersect(packages: list) -> bool:
     # Returns the set of packages that have at least one
     # overlap with another package
-    result = set()
+    result = OrderedSet()
     for p1 in packages:
         for p2 in packages:
             iter_val = bbox_intersect(p1.bbox, p2.bbox)
@@ -806,7 +807,7 @@ def separate_packages2(packages: list) -> None:
         yforce = k * np.sum([f.y for f in pkg1force])
         pkg1.translate(xy(xforce, yforce))
 
-def separate_packages3(packages: list, moved: dict = {}) -> None:
+def separate_packages3(ax, packages: list, moved: dict = {}) -> None:
     # Move packages by overlap
     for pkg1 in packages:
         for pkg2 in packages:
@@ -827,6 +828,10 @@ def separate_packages3(packages: list, moved: dict = {}) -> None:
             else:
                 moved[pkg2] = [amt, 1]
             pkg2.translate(moved[pkg2][0])
+            # clr_plot(ax)
+            # draw_packages(ax, packages)
+            # plt.pause(1)
+
     return moved
 
 
@@ -858,8 +863,9 @@ def compact_packages(packages: list)-> None:
 
 def clr_plot(ax):
     plt.cla()
-    ax.set_xlim(-40, 40)
-    ax.set_ylim(-40, 40)
+    lim = 20
+    ax.set_xlim(-lim, lim)
+    ax.set_ylim(-lim, lim)
     #ax.autoscale(True)
     ax.set_aspect('equal')
     #ax.grid('both')
@@ -879,16 +885,18 @@ def on_click(event):
 
 if __name__ == '__main__':
 
-    packages = make_packages(10)
+    packages = make_packages(5)
 
-    # packages=(
+    #packages=(
     #              Package('LPS22DF', pos=xy(-0.5,   0.0), rot=0),
     #              Package('LPS22DF', pos=xy(0.5,   0.0), rot=0),
-    #              Package('LT4312f',  pos=xy(-0.0,  0.0), rot=0),
+                #  Package('LT4312f',  pos=xy(0.0,  0.0), rot=0),
+                #  Package('LT4312f',  pos=xy(-3.0,  0.0), rot=0),
+                #  Package('LT4312f',  pos=xy(3.0,  0.0), rot=0),
                  # Package('SX9376',  pos=xy(2.5,   0.0), rot=0),
     #            Package('SLG51001',  pos=xy(2.5,   0.0), rot=0),
     #             )
-    
+    #
     ax = plt.axes()
 
     binding_id = plt.connect('motion_notify_event', on_move)
@@ -906,19 +914,21 @@ if __name__ == '__main__':
     while (i < 100):
         xsect = packages_intersect(packages) 
         if not xsect: break
-    #   print(f'i={i}, intersection qty={len(xsect)}')
-        moved_history = separate_packages3(xsect, moved_history)
+        moved_history = separate_packages3(ax, xsect, moved_history)
         clr_plot(ax)
         draw_packages(ax, packages)
         i += 1
         
-    print('done',i)
+    print('done spreading',i)
 
-    # xltmag = 1000.0
-    # while (xltmag > 0.001):
-    #     xltmag = compact_packages(packages)
-    #     clr_plot(ax)
-    #     draw_packages(ax, packages)
+    xltmag = 1000.0
+    while (xltmag > 0.001):
+        xltmag = compact_packages(packages)
+        xsect = packages_intersect(packages) 
+        if not xsect: break
+        separate_packages3(ax, xsect, {})
+        clr_plot(ax)
+        draw_packages(ax, packages)
 
     clr_plot(ax)
     draw_packages(ax, packages)
