@@ -15,6 +15,7 @@ from functools import reduce
 import copy
 from ordered_set_37 import OrderedSet
 import packspecs
+import operator
 
 
 def first(x):
@@ -25,6 +26,12 @@ def second(x):
     return x[1]
 def fsecond(x):
     return x[1][0]
+def rest(x):
+    return x[1:]
+def unpack(dikt, *keyz):
+    return tuple(dikt[k] for k in keyz)
+
+d = {'cow':'moo', 'horse':'neigh', 'donkey':'eeaww'}
 
 
 def xfrm_to_deg(m):
@@ -336,9 +343,10 @@ class Rectangle(Shape):
     @property
     def leftedge(self):
         # Return x,y tuples of two leftmost points
-        sortedpts = sorted(self.points, key=first)
-        return tuple(tuple(x.tolist()) for x in sortedpts[0:2])
-    @property
+        sortedpts = sorted(self.transcorners, key=lambda x: x[0])[0:2]
+        sortedpts = sorted(sortedpts, key=lambda x: x[1])
+        return tuple(xy(*sp) for sp in sortedpts)
+    @property 
     def right(self):
         # Return maximum x value after transform
         pts = self.points
@@ -347,8 +355,9 @@ class Rectangle(Shape):
     @property
     def rightedge(self):
         # Return x,y tuples of two rightmost points
-        sortedpts = sorted(self.points, key=first, reverse=True)
-        return tuple(tuple(x.tolist()) for x in sortedpts[0:2])
+        sortedpts = sorted(self.transcorners, key=lambda x: x[0], reverse=True)[0:2]
+        sortedpts = sorted(sortedpts, key=lambda x: x[1])
+        return tuple(xy(*sp) for sp in sortedpts)
     @property
     def bottom(self):
         # Return minimum y value after transform
@@ -358,8 +367,11 @@ class Rectangle(Shape):
     @property
     def bottomedge(self):
         # Return x,y tuples of two leftmost points
-        sortedpts = sorted(self.points, key=second)
-        return tuple(tuple(x.tolist()) for x in sortedpts[0:2])
+        # Do sorting in two steps because rotation leaves tiny errors which
+        # mess up the sorting
+        sortedpts = sorted(self.transcorners, key=lambda x: x[1])[0:2]
+        sortedpts = sorted(sortedpts, key=lambda x: x[0]) # for some reason nested sorting didn't work
+        return tuple(xy(*sp) for sp in sortedpts)
     @property
     def top(self):
         # Return maximum y value after transform
@@ -369,8 +381,9 @@ class Rectangle(Shape):
     @property
     def topedge(self):
         # Return x,y tuples of two leftmost points
-        sortedpts = sorted(self.points, key=second, reverse=True)
-        return tuple(tuple(x.tolist()) for x in sortedpts[0:2])
+        sortedpts = sorted(self.transcorners, key=lambda x: x[1], reverse=True)[0:2]
+        sortedpts = sorted(sortedpts, key=lambda x: x[0])
+        return tuple(xy(*sp) for sp in sortedpts)
     @property
     def points(self):
         # Returns Nx2 array of points after transform
@@ -379,6 +392,10 @@ class Rectangle(Shape):
         arr = np.asarray(self.matrix) # convert to matrix
         arr = arr[0:2, :].transpose() # throw away bottom row and get N x 2
         return arr
+    @property
+    def transcorners(self):
+        # Similar to corners(), but returns values after transform
+        return tuple(map(tuple, self.points))
     @property
     def corners(self):
         # Returns pairs of points before transform
@@ -481,7 +498,6 @@ class CircPin:
         pos = localxfrm.to_values()[-2:]
         rot = xfrm_to_deg(localxfrm)
         #ax.text(*pos, s=self.name, va='center', ha='center', rotation=rot, clip_on=True)
-
 
 class Package:
     def __init__(self, name, refdes, pos=xy(0.0, 0.0), rot=0.0): #name, body, pins, bbox):
@@ -848,9 +864,9 @@ def draw_packages(ax: plt.Axes, packages: list) -> None:
     #ax.figure.canvas.draw()
     plt.pause(0.0001)
 
-def packages_intersect(packages: list) -> bool:
+def packages_intersect(packages: list) -> set or bool:
     # Returns the set of packages that have at least one
-    # overlap with another package
+    # overlap with another package, or false if none
     result = OrderedSet()
     for p1 in packages:
         for p2 in packages:
@@ -933,15 +949,56 @@ def compact_packages(packages: list)-> None:
         totalxlate = totalxlate + xlate.mag()
     return totalxlate
 
+def overlap(spana: tuple, spanb: tuple) -> bool:
+    # Returns true if any part of span a overlaps with any part of span b
+    # For spans to clear, the edges must be >, etc., not >=
+    # This is similar to the bounding box routine
+    # Assumes the [0]th element is always <= [1]th element
+    if spana[1] < spanb[0]: return False
+    if spana[0] > spanb[1]: return False
+    return True
+
+
 def shadow(packages, direction='leftright'):
     # Sort packages' left edges
+    # each 'edge' is ((x1,y1), (x2,y2))
+    # For a left edge, x1 and x2 are the same, so we take [0].x
+    # For a bottom edge, y1 and y2 are the same, so we take [0].y
+    # For span of left edge, we take [0].y and [1].y
+    # For span of bottom edge, we take [0].x and [1].x
     if direction == 'leftright':
-        edges = [{'package':p, 'edge': p.bbox.leftedge} for p in packages]
-        sortededges = sorted(edges, key=lambda x: x['edge'][0][0])
+        pack_edges = [{'package':p, 'edge': p.bbox.leftedge} for p in packages]
+        sorted_packages = sorted(pack_edges, key=lambda x: x['edge'][0].x)
     elif direction == 'bottomtop':
-        edges = [{'package':p, 'edge': p.bbox.bottomedge} for p in packages]
-        sortededges = sorted(edges, key=lambda x: x['edge'][0][1])
-    return sortededges
+        pack_edges = [{'package':p, 'edge': p.bbox.bottomedge} for p in packages]
+        sorted_packages = sorted(pack_edges, key=lambda x: x['edge'][0].y)
+
+    print([p['package'].refdes for p in sorted_packages])
+
+    G = {}
+    head = first(sorted_packages)
+    tail = rest(sorted_packages)
+    
+    if direction == 'leftright':   
+        while(True):
+            if not tail:
+                break
+            packagea, edgea = unpack(head, 'package', 'edge')
+            spana = (edgea[0].y, edgea[1].y) # take y's
+            for item in tail:
+                packageb, edgeb = unpack(item, 'package', 'edge')
+                spanb = (edgeb[0].y, edgeb[1].y)
+                if overlap(spana, spanb):
+                    G[packagea] = packageb # todo: add edge strength somehow
+            head = first(tail)
+            tail = rest(tail)
+
+# TODO: KEEP WORKING ON THIS!
+
+    elif direction == 'bottomtop':
+        pass
+    print(span)
+        
         
 def clr_plot(ax):
     plt.cla()
@@ -958,23 +1015,23 @@ if __name__ == '__main__':
     # PKGS = packages
 
     packages=(
-                Package('RCMF2512', 'R1', pos=xy( 2.0, 0.0)),
+                Package('RCMF2512', 'R1', pos=xy( 2.0, 0.0),),
                 Package('RCMF2512', 'R2', pos=xy(10.0, 5.0)),
-                Package('LPS22DF',  'U1', pos=xy(-0.5, 0.0), rot=0),
-                Package('LPS22DF',  'U2', pos=xy(-3.0, 0.0), rot=0),
+                #Package('LPS22DF',  'U1', pos=xy(-0.5, 0.0), rot=0),
+                #Package('LPS22DF',  'U2', pos=xy(-3.0, 0.0), rot=0),
                 # Package('LT4312f',  pos=xy(0.0,  0.0), rot=0),
                 # Package('LT4312f',  pos=xy(-3.0,  0.0), rot=0),
                 # Package('LT4312f',  pos=xy(3.0,  0.0), rot=0),
                 # Package('SX9376',  pos=xy(2.5,   0.0), rot=0),
                 # Package('SLG51001',  pos=xy(2.5,   0.0), rot=0),
                 )
-    packages = make_packages(10)
+    #packages = make_packages(10)
 
     ax = plt.axes()
     dm = DragManager(ax)
     dm.add_packages(packages)
 
-    randomize_packages(packages)
+    #randomize_packages(packages)
 
     clr_plot(ax)
     draw_packages(ax, packages)
@@ -989,9 +1046,9 @@ if __name__ == '__main__':
         draw_packages(ax, packages)
         i += 1
         
-    sorted_packages = shadow(packages, direction='bottomtop')
-    print([p['package'].refdes for p in sorted_packages])
-    print('done spreading',i)
+    sorted_packages = shadow(packages)
+    # print([p['package'].refdes for p in sorted_packages])
+    # print('done spreading',i)
 
     # xltmag = 1000.0
     # while (xltmag > 0.001):
