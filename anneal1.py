@@ -3,7 +3,7 @@
 from inspect import stack
 from io import BytesIO
 from matplotlib.figure import Figure
-from matplotlib import pyplot as plt
+from matplotlib import axes, pyplot as plt
 from matplotlib import patches
 from matplotlib import transforms
 from matplotlib.backend_bases import MouseButton
@@ -14,6 +14,7 @@ import random
 from functools import reduce
 import copy
 from ordered_set_37 import OrderedSet
+import packspecs
 
 def xfrm_to_deg(m):
     # https://math.stackexchange.com/questions/13150/extracting-rotation-scale-values-from-2d-transformation-matrix
@@ -93,6 +94,12 @@ class xy:
     def norm(self):
         m = self.mag()
         return xy(self.x / m, self.y / m)
+    def within(self, rect):
+        if self.x < rect.left: return False
+        if self.x > rect.right: return False
+        if self.y < rect.bottom: return False
+        if self.y > rect.top: return False
+        return True
 
 class wh:
     def __init__(self, *args, **kwargs):
@@ -143,6 +150,8 @@ class Shape:
     def __init__(self):
         self.transform = transforms.Affine2D()
         self.children = []
+        self.dirty = True
+        self.oldparentxfrm = None
     def translate(self, val: xy):
         # do something with matrix
         self.transform.translate(val.x, val.y)
@@ -232,12 +241,16 @@ class Rectangle(Shape):
         self.matrix = np.matrix(self.corners).transpose()
         self.matrix = np.insert(self.matrix, [2], 1, axis=0)
         self.matrix = self.transform.get_matrix() * self.matrix
+        self.dirty = True
     def draw(self, ax: plt.Axes, xfrm=transforms.Affine2D()):
         # xfrm is parent's position and rotation
-        pts = xfrm * self.matrix
-        pts = pts[0:2, :].transpose() # throw away bottom row and get N x 2
-        patch = patches.Polygon(pts, **self.patchargs)
-        ax.add_patch(patch)
+        if self.dirty or xfrm is self.oldparentxfrm:
+            pts = xfrm * self.matrix
+            pts = pts[0:2, :].transpose() # throw away bottom row and get N x 2
+            self.patch = patches.Polygon(pts, **self.patchargs)
+            self.oldparentxfrm = xfrm
+        ax.add_patch(self.patch)
+        self.dirty = False
     def __getitem__(self, i):
         if (i == 0):
             return self._xy.x
@@ -362,9 +375,9 @@ class RectPin:
     def draw(self, ax, xfrm=transforms.Affine2D()):
         # xfrm is parent's translation and rotation
         self.rect.draw(ax, xfrm)
-        localxfrm = self.rect.transform + xfrm
-        pos = localxfrm.to_values()[-2:]
-        rot = xfrm_to_deg(localxfrm)
+        #localxfrm = self.rect.transform + xfrm
+        #pos = localxfrm.to_values()[-2:]
+        #rot = xfrm_to_deg(localxfrm)
         #ax.text(*pos, s=self.name, va='center', ha='center', rotation=rot, clip_on=True)
 
 class Circle(Shape):
@@ -438,28 +451,13 @@ class CircPin:
         rot = xfrm_to_deg(localxfrm)
         #ax.text(*pos, s=self.name, va='center', ha='center', rotation=rot, clip_on=True)
 
-packspecs = {
-    'RCMF01005': {'W': 0.4,   'H': 0.2,   'pintype': 'two-pin-passive', 'pindims': {'inner': 0.2,         'outer': 0.5,        'minordim': 0.2}},
-    'RCMF0201':  {'W': 0.6,   'H': 0.3,   'pintype': 'two-pin-passive', 'pindims': {'inner': 0.3,         'outer': 1.0,        'minordim': 0.4}},
-    'RCMF0402':  {'W': 1.0,   'H': 0.5,   'pintype': 'two-pin-passive', 'pindims': {'inner': 0.5,         'outer': 1.5,        'minordim': 0.6}},
-    'RCMF0603':  {'W': 1.55,  'H': 0.8,   'pintype': 'two-pin-passive', 'pindims': {'inner': 0.8,         'outer': 2.1,        'minordim': 0.9}},
-    'RCMF0805':  {'W': 2.0,   'H': 1.25,  'pintype': 'two-pin-passive', 'pindims': {'inner': 1.2,         'outer': 3.0,        'minordim': 1.3}},
-    'RCMF1206':  {'W': 3.2,   'H': 1.6,   'pintype': 'two-pin-passive', 'pindims': {'inner': 2.2,         'outer': 4.2,        'minordim': 1.6}},
-    'RCMF1210':  {'W': 3.2,   'H': 2.5,   'pintype': 'two-pin-passive', 'pindims': {'inner': 2.2,         'outer': 4.2,        'minordim': 2.8}},
-    'RCMF2010':  {'W': 5.0,   'H': 2.5,   'pintype': 'two-pin-passive', 'pindims': {'inner': 3.5,         'outer': 6.1,        'minordim': 2.8}},
-    'RCMF2512':  {'W': 6.3,   'H': 3.2,   'pintype': 'two-pin-passive', 'pindims': {'inner': 4.9,         'outer': 8.0,        'minordim': 3.5}},
-    'LT4312f' :  {'W': 3.0,   'H': 4.0392,'pintype': 'dual-row-ic',     'pindims': {'inner': 3.2,         'outer': 5.23,       'minordim': 0.305,       'numpins': 16,     'minorpitch': 0.5        }},
-    'SX9376'  :  {'W': 1.8,   'H': 1.9,   'pintype': 'quad-row-ic',     'pindims': {'inner': (1.1, 1.0),  'outer': (2.3, 2.2), 'minordim': (0.2, 0.2),  'numpins':  [6,6], 'minorpitch': (0.4, 0.4) }},
-    'LPS22DF' :  {'W': 2.0,   'H': 2.0,   'pintype': 'quad-row-ic',     'pindims': {'inner': (1.25,1.25), 'outer': (2.3,2.3),  'minordim': (0.25,0.25), 'numpins':  [6,4], 'minorpitch': (0.5,0.5)  }},
-    'SLG51001':  {'W': 1.675, 'H': 1.675, 'pintype': 'ball-array',      'pindims': {'rows': 4, 'cols': 4, 'pitch': 0.4, 'dia': 0.27}}
-    }
 
 class Package:
     def __init__(self, name, pos=xy(0.0, 0.0), rot=0.0): #name, body, pins, bbox):
         self.name = name
         self.pos = xy(0.0, 0.0)
         self.rot = 0.0 # <-- these update in the initial rotate and translate below
-        pdict = packspecs[name]
+        pdict = packspecs.packspecs[name]
         majordim = pdict['W']
         minordim = pdict['H']
         pindims = pdict['pindims']
@@ -507,7 +505,7 @@ class Package:
 
         # Extract rotation from transform, draw body and package type
         self.body.draw(ax, xfrm)
-        localxfrm = self.body.transform + xfrm
+        #localxfrm = self.body.transform + xfrm
         #pos = localxfrm.to_values()[-2:]
         #rot = xfrm_to_deg(localxfrm)
         #ax.text(*pos, s=self.name, va='center', ha='center', rotation=rot, clip_on=True)
@@ -517,6 +515,67 @@ class Package:
         for pin in self.pins:
             pin.draw(ax, self.body.transform)
         self.bbox.draw(ax)
+    def hittest(self, x, y):
+        bb = self.bbox
+        if x < bb.left: return False
+        if x > bb.right: return False
+        if y < bb.bottom: return False
+        if y > bb.top: return False
+        return True
+
+class DragManager:
+    def __init__(self, ax):
+        self.press = None
+        # self.packages will take the form {package: {clickpos: xy(x,y)}}
+        self.packages = {}
+        self.ax = ax
+        self.cidpress   = ax.figure.canvas.mpl_connect('button_press_event', self.on_press)
+        self.cidrelease = ax.figure.canvas.mpl_connect('button_release_event', self.on_release)
+        self.cidmotion  = ax.figure.canvas.mpl_connect('motion_notify_event', self.on_motion)
+        self.dragging = False
+    
+    def add_package(self, pkg):
+        self.packages[pkg] = {}
+    
+    def add_packages(self, pkgs):
+        for p in pkgs:
+            self.packages[p] = {}
+    
+    def on_press(self, event):
+        """Check whether mouse is over us; if so, store some data."""
+        if event.inaxes is None: return
+        for p in self.packages:
+            # This line could be a db search on coords
+            # or a dict lookup by coords
+            if p.hittest(event.xdata, event.ydata):
+                self.clickpackage = p
+                self.lastpos = xy(event.xdata, event.ydata)
+                self.dragging = True
+                break
+
+    def on_motion(self, event):
+        """Move the rectangle if the mouse is over us."""
+        if event is None: return
+        if not self.dragging: return
+        if event.inaxes != self.ax: return
+        thispos = xy(event.xdata, event.ydata)
+        dpos = thispos - self.lastpos
+        self.lastpos = thispos
+        self.clickpackage.translate(dpos)
+        clr_plot(self.ax)
+        draw_packages(self.ax, self.packages)
+
+
+    def on_release(self, event):
+        """Clear button press information."""
+        self.dragging = False
+        #self.ax.figure.canvas.draw()
+
+    def disconnect(self):
+        """Disconnect all callbacks."""
+        self.ax.figure.canvas.mpl_disconnect(self.cidpress)
+        self.ax.figure.canvas.mpl_disconnect(self.cidrelease)
+        self.ax.figure.canvas.mpl_disconnect(self.cidmotion)
 
 def pitch_to_offset(pitch, numpins):
     """Given pitch and number of pins, return
@@ -654,7 +713,7 @@ def union_box(box1: Rectangle, box2: Rectangle) -> Rectangle:
     right = max(box1.right,  box2.right)
     bot   = min(box1.bottom, box2.bottom)
     top   = max(box1.top,    box2.top)
-    return Rectangle(left, bot, right - left, top - bot, patchargs={'color':'green', 'alpha':0.5, 'fill':None})
+    return Rectangle(left, bot, right - left, top - bot, patchargs={'color':'green', 'alpha':0.5, 'fill':False})
 
 def make_bounding_box(body: Rectangle, pins: list) -> Rectangle:
     """Bounding box relative to body coordinates"""
@@ -731,31 +790,7 @@ def make_packages(qty=1, minpins=2, maxpins=10):
     """Generate random packages.  Return iterable"""
     # ru = random.uniform
     rs = random.sample
-    return [Package(name=rs(packspecs.keys(), 1)[0]) for i in range(qty)]
-
-    # return (Package('RCMF01005', pos=xy(0.0,   0.0), rot=random.uniform(-2,2)),
-    #         Package('RCMF01005', pos=xy(2.5,   0.0), rot=random.uniform(-2,2)),
-    #         Package('RCMF0201' , pos=xy(0.0,   1.5), rot=random.uniform(-2,2)),
-    #         Package('RCMF0201' , pos=xy(2.5,   1.5), rot=random.uniform(-2,2)),
-    #         Package('RCMF0402' , pos=xy(0.0,   3.0), rot=random.uniform(-2,2)),
-    #         Package('RCMF0402' , pos=xy(2.5,   3.0), rot=random.uniform(-2,2)),
-    #         Package('RCMF0603' , pos=xy(0.0,   4.5), rot=random.uniform(-2,2)),
-    #         Package('RCMF0603' , pos=xy(2.5,   4.5), rot=random.uniform(-2,2)),
-    #         Package('RCMF0805' , pos=xy(0.0,   6.0), rot=random.uniform(-2,2)),
-    #         Package('RCMF0805' , pos=xy(3.5,   6.0), rot=random.uniform(-2,2)),
-    #         Package('RCMF1206' , pos=xy(0.0,   8.0), rot=random.uniform(-2,2)),
-    #         Package('RCMF1206' , pos=xy(5.0,   8.0), rot=random.uniform(-2,2)),
-    #         Package('RCMF1210' , pos=xy(0.0,  11.0), rot=random.uniform(-2,2)),
-    #         Package('RCMF1210' , pos=xy(6.0,  11.0), rot=random.uniform(-2,2)),
-    #         Package('RCMF2010' , pos=xy(0.0,  15.0), rot=random.uniform(-2,2)),
-    #         Package('RCMF2010' , pos=xy(7.0,  15.0), rot=random.uniform(-2,2)),
-    #         Package('RCMF2512' , pos=xy(0.0,  19.0), rot=random.uniform(-2,2)),
-    #         Package('RCMF2512' , pos=xy(10.0, 19.0), rot=random.uniform(-2,2)),
-    #         Package('LT4312f'  , pos=xy(10.0,  2.0), rot=random.uniform(-2,2)),
-    #         Package('SX9376'   , pos=xy(9.0,   7.0), rot=random.uniform(-2,2)),
-    #         Package('LPS22DF'  , pos=xy(12.0,  7.0), rot=random.uniform(-2,2)),
-    #         Package('SLG51001' , pos=xy(10.0, 10.0), rot=random.uniform(-2,2)))
-
+    return [Package(name=rs(packspecs.packspecs.keys(), 1)[0]) for i in range(qty)]
 
 def randomize_packages(packages: list) -> None:
     for p in packages:
@@ -766,8 +801,8 @@ def randomize_packages(packages: list) -> None:
 def draw_packages(ax: plt.Axes, packages: list) -> None:
     for package in packages:
         package.draw(ax)
+    #ax.figure.canvas.draw()
     plt.pause(0.0001)
-    plt.draw()
 
 def packages_intersect(packages: list) -> bool:
     # Returns the set of packages that have at least one
@@ -828,13 +863,7 @@ def separate_packages3(ax, packages: list, moved: dict = {}) -> None:
             else:
                 moved[pkg2] = [amt, 1]
             pkg2.translate(moved[pkg2][0])
-            # clr_plot(ax)
-            # draw_packages(ax, packages)
-            # plt.pause(1)
-
     return moved
-
-
 
 def compact_packages(packages: list)-> None:
     # Move packages by attractive springs (proportional to distance)
@@ -859,7 +888,7 @@ def compact_packages(packages: list)-> None:
         pkg.translate(xlate)
         totalxlate = totalxlate + xlate.mag()
     return totalxlate
-    
+
 
 def clr_plot(ax):
     plt.cla()
@@ -870,44 +899,33 @@ def clr_plot(ax):
     ax.set_aspect('equal')
     #ax.grid('both')
 
-def on_move(event):
-    # get the x and y pixel coords
-    x, y = event.x, event.y
-    if event.inaxes:
-        ax = event.inaxes  # the axes instance
-        print('data coords %f %f' % (event.xdata, event.ydata))
-
-bindind_id = None
-def on_click(event):
-    if event.button is MouseButton.LEFT:
-        print('disconnecting callback')
-        plt.disconnect(binding_id)
-
 if __name__ == '__main__':
 
-    packages = make_packages(5)
 
-    #packages=(
-    #              Package('LPS22DF', pos=xy(-0.5,   0.0), rot=0),
-    #              Package('LPS22DF', pos=xy(0.5,   0.0), rot=0),
-                #  Package('LT4312f',  pos=xy(0.0,  0.0), rot=0),
-                #  Package('LT4312f',  pos=xy(-3.0,  0.0), rot=0),
-                #  Package('LT4312f',  pos=xy(3.0,  0.0), rot=0),
-                 # Package('SX9376',  pos=xy(2.5,   0.0), rot=0),
-    #            Package('SLG51001',  pos=xy(2.5,   0.0), rot=0),
-    #             )
-    #
+    # PKGS = packages
+
+    packages=(
+                Package('RCMF2512'),
+                Package('RCMF2512'),
+                Package('LPS22DF', pos=xy(-0.5,   0.0), rot=0),
+                Package('LPS22DF', pos=xy(0.5,   0.0), rot=0),
+                # Package('LT4312f',  pos=xy(0.0,  0.0), rot=0),
+                # Package('LT4312f',  pos=xy(-3.0,  0.0), rot=0),
+                # Package('LT4312f',  pos=xy(3.0,  0.0), rot=0),
+                # Package('SX9376',  pos=xy(2.5,   0.0), rot=0),
+                # Package('SLG51001',  pos=xy(2.5,   0.0), rot=0),
+                )
+    #packages = make_packages(30)
+
     ax = plt.axes()
-
-    binding_id = plt.connect('motion_notify_event', on_move)
-    plt.connect('button_press_event', on_click)
+    dm = DragManager(ax)
+    dm.add_packages(packages)
 
     positions = []
     randomize_packages(packages)
 
     clr_plot(ax)
     draw_packages(ax, packages)
-    #plt.pause(1)
     i = 0
     moved_history = {}
     print('starting')
@@ -921,17 +939,18 @@ if __name__ == '__main__':
         
     print('done spreading',i)
 
-    xltmag = 1000.0
-    while (xltmag > 0.001):
-        xltmag = compact_packages(packages)
-        xsect = packages_intersect(packages) 
-        if not xsect: break
-        separate_packages3(ax, xsect, {})
-        clr_plot(ax)
-        draw_packages(ax, packages)
+    # xltmag = 1000.0
+    # while (xltmag > 0.001):
+    #     xltmag = compact_packages(packages)
+    #     #xsect = packages_intersect(packages) 
+    #     #if not xsect: break
+    #     separate_packages3(ax, xsect, {})
+    #     clr_plot(ax)
+    #     draw_packages(ax, packages)
 
-    clr_plot(ax)
-    draw_packages(ax, packages)
+    # clr_plot(ax)
+    # draw_packages(ax, packages)
 
     plt.show()
+    dm.disconnect()
 
