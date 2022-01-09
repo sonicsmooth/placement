@@ -16,6 +16,17 @@ import copy
 from ordered_set_37 import OrderedSet
 import packspecs
 
+
+def first(x):
+    return x[0]
+def ffirst(x):
+    return x[0][0]
+def second(x):
+    return x[1]
+def fsecond(x):
+    return x[1][0]
+
+
 def xfrm_to_deg(m):
     # https://math.stackexchange.com/questions/13150/extracting-rotation-scale-values-from-2d-transformation-matrix
     a,c,b,d,tx,ty = m.to_values()
@@ -323,11 +334,21 @@ class Rectangle(Shape):
         pts = pts[:,0]
         return np.min(pts)
     @property
+    def leftedge(self):
+        # Return x,y tuples of two leftmost points
+        sortedpts = sorted(self.points, key=first)
+        return tuple(tuple(x.tolist()) for x in sortedpts[0:2])
+    @property
     def right(self):
         # Return maximum x value after transform
         pts = self.points
         pts = pts[:,0]
         return np.max(pts)
+    @property
+    def rightedge(self):
+        # Return x,y tuples of two rightmost points
+        sortedpts = sorted(self.points, key=first, reverse=True)
+        return tuple(tuple(x.tolist()) for x in sortedpts[0:2])
     @property
     def bottom(self):
         # Return minimum y value after transform
@@ -335,11 +356,21 @@ class Rectangle(Shape):
         pts = pts[:,1]
         return np.min(pts)
     @property
+    def bottomedge(self):
+        # Return x,y tuples of two leftmost points
+        sortedpts = sorted(self.points, key=second)
+        return tuple(tuple(x.tolist()) for x in sortedpts[0:2])
+    @property
     def top(self):
         # Return maximum y value after transform
         pts = self.points
         pts = pts[:,1]
         return np.max(pts)
+    @property
+    def topedge(self):
+        # Return x,y tuples of two leftmost points
+        sortedpts = sorted(self.points, key=second, reverse=True)
+        return tuple(tuple(x.tolist()) for x in sortedpts[0:2])
     @property
     def points(self):
         # Returns Nx2 array of points after transform
@@ -889,6 +920,13 @@ def compact_packages(packages: list)-> None:
         totalxlate = totalxlate + xlate.mag()
     return totalxlate
 
+def shadow(packages):
+    # Sort packages' left edges
+    leftedges = [{'package':p, 'edge': p.bbox.leftedge} for p in packages]
+    sortededges = sorted(leftedges, key=lambda x: ffirst(x['edge']))
+    return sortededges
+        
+
 
 def clr_plot(ax):
     plt.cla()
@@ -905,10 +943,10 @@ if __name__ == '__main__':
     # PKGS = packages
 
     packages=(
-                Package('RCMF2512'),
-                Package('RCMF2512'),
-                Package('LPS22DF', pos=xy(-0.5,   0.0), rot=0),
-                Package('LPS22DF', pos=xy(0.5,   0.0), rot=0),
+                Package('RCMF2512', pos=xy( 2.0, 0.0)),
+                Package('RCMF2512', pos=xy(10.0, 5.0)),
+                Package('LPS22DF',  pos=xy(-0.5, 0.0), rot=0),
+                Package('LPS22DF',  pos=xy(-3.0, 0.0), rot=0),
                 # Package('LT4312f',  pos=xy(0.0,  0.0), rot=0),
                 # Package('LT4312f',  pos=xy(-3.0,  0.0), rot=0),
                 # Package('LT4312f',  pos=xy(3.0,  0.0), rot=0),
@@ -916,6 +954,11 @@ if __name__ == '__main__':
                 # Package('SLG51001',  pos=xy(2.5,   0.0), rot=0),
                 )
     #packages = make_packages(30)
+    e1 = packages[0].bbox.leftedge
+    e2 = packages[1].bbox.leftedge
+    e3 = packages[2].bbox.leftedge
+    e4 = packages[3].bbox.leftedge
+    shadow(packages)
 
     ax = plt.axes()
     dm = DragManager(ax)
