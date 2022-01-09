@@ -511,7 +511,7 @@ class Package:
         self.rotate(rot)
         self.translate(pos)
     def __repr__(self):
-        return f'Package({self.name},{self.pos})'
+        return f'Package({self.name},{self.refdes},{self.pos})'
     def translate(self, val: xy):
         self.pos = self.pos + val
         self.body.translate(val)
@@ -818,16 +818,23 @@ def bbox_intersect(r1: Rectangle, r2: Rectangle) -> bool:
 
     return retval
 
-def make_packages(qty=1, minpins=2, maxpins=10):
+def make_packages(qty=1):
     """Generate random packages.  Return iterable"""
     # ru = random.uniform
     rs = random.sample
     plist = []
+    rcount = 1
+    ucount = 1
     for i in range(qty):
         name = first(random.sample(packspecs.packspecs.keys(), 1))
-        refdes = f'U{i}'
-        p = Package(name=rs(packspecs.packspecs.keys(), 1)[0]) 
-    return [for i in range(qty)]
+        if name.startswith('RCM'):
+            refdes = f'R{rcount}'
+            rcount += 1
+        else:
+            refdes = f'U{ucount}'
+            ucount += 1
+        plist.append(Package(name, refdes))
+    return plist
 
 def randomize_packages(packages: list) -> None:
     for p in packages:
@@ -926,14 +933,16 @@ def compact_packages(packages: list)-> None:
         totalxlate = totalxlate + xlate.mag()
     return totalxlate
 
-def shadow(packages):
+def shadow(packages, direction='leftright'):
     # Sort packages' left edges
-    leftedges = [{'package':p, 'edge': p.bbox.leftedge} for p in packages]
-    sortededges = sorted(leftedges, key=lambda x: ffirst(x['edge']))
+    if direction == 'leftright':
+        edges = [{'package':p, 'edge': p.bbox.leftedge} for p in packages]
+        sortededges = sorted(edges, key=lambda x: x['edge'][0][0])
+    elif direction == 'bottomtop':
+        edges = [{'package':p, 'edge': p.bbox.bottomedge} for p in packages]
+        sortededges = sorted(edges, key=lambda x: x['edge'][0][1])
     return sortededges
         
-
-
 def clr_plot(ax):
     plt.cla()
     lim = 20
@@ -949,28 +958,22 @@ if __name__ == '__main__':
     # PKGS = packages
 
     packages=(
-                Package('RCMF2512', pos=xy( 2.0, 0.0)),
-                Package('RCMF2512', pos=xy(10.0, 5.0)),
-                Package('LPS22DF',  pos=xy(-0.5, 0.0), rot=0),
-                Package('LPS22DF',  pos=xy(-3.0, 0.0), rot=0),
+                Package('RCMF2512', 'R1', pos=xy( 2.0, 0.0)),
+                Package('RCMF2512', 'R2', pos=xy(10.0, 5.0)),
+                Package('LPS22DF',  'U1', pos=xy(-0.5, 0.0), rot=0),
+                Package('LPS22DF',  'U2', pos=xy(-3.0, 0.0), rot=0),
                 # Package('LT4312f',  pos=xy(0.0,  0.0), rot=0),
                 # Package('LT4312f',  pos=xy(-3.0,  0.0), rot=0),
                 # Package('LT4312f',  pos=xy(3.0,  0.0), rot=0),
                 # Package('SX9376',  pos=xy(2.5,   0.0), rot=0),
                 # Package('SLG51001',  pos=xy(2.5,   0.0), rot=0),
                 )
-    #packages = make_packages(30)
-    e1 = packages[0].bbox.leftedge
-    e2 = packages[1].bbox.leftedge
-    e3 = packages[2].bbox.leftedge
-    e4 = packages[3].bbox.leftedge
-    shadow(packages)
+    packages = make_packages(10)
 
     ax = plt.axes()
     dm = DragManager(ax)
     dm.add_packages(packages)
 
-    positions = []
     randomize_packages(packages)
 
     clr_plot(ax)
@@ -986,6 +989,8 @@ if __name__ == '__main__':
         draw_packages(ax, packages)
         i += 1
         
+    sorted_packages = shadow(packages, direction='bottomtop')
+    print([p['package'].refdes for p in sorted_packages])
     print('done spreading',i)
 
     # xltmag = 1000.0
