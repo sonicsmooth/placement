@@ -484,8 +484,9 @@ class CircPin:
 
 
 class Package:
-    def __init__(self, name, pos=xy(0.0, 0.0), rot=0.0): #name, body, pins, bbox):
+    def __init__(self, name, refdes, pos=xy(0.0, 0.0), rot=0.0): #name, body, pins, bbox):
         self.name = name
+        self.refdes = refdes
         self.pos = xy(0.0, 0.0)
         self.rot = 0.0 # <-- these update in the initial rotate and translate below
         pdict = packspecs.packspecs[name]
@@ -536,11 +537,11 @@ class Package:
 
         # Extract rotation from transform, draw body and package type
         self.body.draw(ax, xfrm)
-        #localxfrm = self.body.transform + xfrm
-        #pos = localxfrm.to_values()[-2:]
-        #rot = xfrm_to_deg(localxfrm)
+        localxfrm = self.body.transform + xfrm
+        pos = localxfrm.to_values()[-2:]
+        rot = xfrm_to_deg(localxfrm)
         #ax.text(*pos, s=self.name, va='center', ha='center', rotation=rot, clip_on=True)
-        # TODO: Add refdes
+        ax.text(*pos, s=self.refdes, va='center', ha='center', rotation=rot, clip_on=True)
 
         # Draw pins and bbox, taking add'l xform from package
         for pin in self.pins:
@@ -821,7 +822,12 @@ def make_packages(qty=1, minpins=2, maxpins=10):
     """Generate random packages.  Return iterable"""
     # ru = random.uniform
     rs = random.sample
-    return [Package(name=rs(packspecs.packspecs.keys(), 1)[0]) for i in range(qty)]
+    plist = []
+    for i in range(qty):
+        name = first(random.sample(packspecs.packspecs.keys(), 1))
+        refdes = f'U{i}'
+        p = Package(name=rs(packspecs.packspecs.keys(), 1)[0]) 
+    return [for i in range(qty)]
 
 def randomize_packages(packages: list) -> None:
     for p in packages:
