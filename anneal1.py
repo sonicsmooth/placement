@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 
 from inspect import stack
-from io import BytesIO
-from matplotlib.figure import Figure
-from matplotlib import axes, pyplot as plt
+from matplotlib import pyplot as plt
 from matplotlib import patches
 from matplotlib import transforms
 from matplotlib.backend_bases import MouseButton
-from pprint import pprint
+import pprint
 import numpy as np
 from numbers import Number
 import random
@@ -15,7 +13,7 @@ from functools import reduce
 import copy
 from ordered_set_37 import OrderedSet
 import packspecs
-import operator
+from graph import Graph
 
 
 def first(x):
@@ -28,6 +26,10 @@ def fsecond(x):
     return x[1][0]
 def rest(x):
     return x[1:]
+def last(x):
+    return x[-1]
+def flast(x):
+    return first(last(x))
 def unpack(dikt, *keyz):
     return tuple(dikt[k] for k in keyz)
 
@@ -581,6 +583,7 @@ class DragManager:
         self.cidrelease = ax.figure.canvas.mpl_connect('button_release_event', self.on_release)
         self.cidmotion  = ax.figure.canvas.mpl_connect('motion_notify_event', self.on_motion)
         self.dragging = False
+        self.G = None
     
     def add_package(self, pkg):
         self.packages[pkg] = {}
@@ -612,6 +615,8 @@ class DragManager:
         self.clickpackage.translate(dpos)
         clr_plot(self.ax)
         draw_packages(self.ax, self.packages)
+        G = shadow(self.packages)
+        print(G)
 
 
     def on_release(self, event):
@@ -958,47 +963,93 @@ def overlap(spana: tuple, spanb: tuple) -> bool:
     if spana[0] > spanb[1]: return False
     return True
 
+def cleanup_intervals(I: list):
+    # Return event edges and total number of active
+    # events after each edge.
+    # eg:
+    # 1  2  3  4  5  6  7  8  9  10  11  12  13
+    #    |-----------|        |------|
+    #       |-----------|            |---|
+    # print(cleanup_intervals([(2,6),(9,11),(3,7),(11,12)      ])) # returns [(2, 7), (9, 12)]
+    # print(cleanup_intervals([(2,6),(9,11),(3,7),(11,12),(7,9)])) # returns [(2, 12)]
+    # print(cleanup_intervals([(1,4),(2,4),(2,4),(5,6),(5,7),(6,7),(9,11),(11,12),(12,13)])) # returns [(1, 4), (5, 7), (9, 13)]
 
-def shadow(packages, direction='leftright'):
-    # Sort packages' left edges
-    # each 'edge' is ((x1,y1), (x2,y2))
-    # For a left edge, x1 and x2 are the same, so we take [0].x
-    # For a bottom edge, y1 and y2 are the same, so we take [0].y
-    # For span of left edge, we take [0].y and [1].y
-    # For span of bottom edge, we take [0].x and [1].x
-    if direction == 'leftright':
-        pack_edges = [{'package':p, 'edge': p.bbox.leftedge} for p in packages]
-        sorted_packages = sorted(pack_edges, key=lambda x: x['edge'][0].x)
-    elif direction == 'bottomtop':
-        pack_edges = [{'package':p, 'edge': p.bbox.bottomedge} for p in packages]
-        sorted_packages = sorted(pack_edges, key=lambda x: x['edge'][0].y)
+    if not I: return []
 
-    print([p['package'].refdes for p in sorted_packages])
+    # Associate each endpoint with a +1 or -1, then sort
+    evts = []
+    for i in I:
+        evts.append((i[0], 1))
+        evts.append((i[1], -1))
+    evts.sort(key=first)
 
-    G = {}
-    head = first(sorted_packages)
-    tail = rest(sorted_packages)
-    
-    if direction == 'leftright':   
-        while(True):
-            if not tail:
-                break
-            packagea, edgea = unpack(head, 'package', 'edge')
-            spana = (edgea[0].y, edgea[1].y) # take y's
-            for item in tail:
-                packageb, edgeb = unpack(item, 'package', 'edge')
-                spanb = (edgeb[0].y, edgeb[1].y)
-                if overlap(spana, spanb):
-                    G[packagea] = packageb # todo: add edge strength somehow
-            head = first(tail)
-            tail = rest(tail)
+    # At each edge, sum total 1's
+    acc = [evts[0]]
+    for e in evts[1:]:
+        prev = acc[-1]
+        val = (first(e), second(prev) + second(e))
+        if first(prev) == first(e): # overwrite if same edge
+            acc[-1] = val
+        else:
+            acc.append(val)
 
-# TODO: KEEP WORKING ON THIS!
+    # Acc is now a list of (edge, count) tuples
+    # Merge edges
+    accout = []
+    group = []
+    for t in acc:
+        # add the tuple to the group if it's the first one or last one, or ...
+        # if the previous element's count was nonzero
+        if t == first(acc) or t == last(acc) or second(group[-1]):
+            group.append(t)
+        else:
+            # Close the group: tuple up the edges and append to output
+            accout.append((ffirst(group), flast(group)))
+            group = [t]
+    accout.append((ffirst(group), flast(group)))
+    return accout
 
-    elif direction == 'bottomtop':
-        pass
-    print(span)
-        
+def intervals_length(I: list):
+    # Return total length of intervals in list,
+    # aka distance between spans without minus the gaps
+    if not I: return 0
+    ci = cleanup_intervals(I)
+    return sum(last(i) - first(i) for i in ci)
+
+def left_edge(component: Package) -> tuple:
+    left = component.bbox.leftedge
+    return (first(left).y, second(left).y)
+
+def in_range(Ii, top, bottom):
+    # Ii is tuple of y values
+    # Return true if either point of Ii lies within top-bottom
+    assert(first(Ii) < second(Ii)) # Make sure the first y is lower than the second
+    if first(Ii) > top: return False
+    if second(Ii) < bottom: return False
+    return True
+
+def shadow(packages, direction='leftright') -> Graph:
+    # Sort packages by left edge
+    sorted_packages = sorted(packages, key=lambda p: p.bbox.leftedge[0].x)
+    component = first(sorted_packages)
+    comp_list = rest(sorted_packages)
+    G = Graph(directed=True)
+    while(comp_list):
+        inner_comp_list = copy.copy(comp_list)
+        I = []
+        bottom,top = left_edge(component)
+        while intervals_length(I) < (top - bottom) and inner_comp_list:
+            curr_comp = inner_comp_list.pop(0)
+            Ii = left_edge(curr_comp)
+            if in_range(Ii, top, bottom):
+                Iprime = cleanup_intervals(I + [Ii])
+                if Iprime != I:
+                    G.add_connections([(component.refdes, curr_comp.refdes)])
+                    I = Iprime
+        component = first(comp_list)
+        comp_list = rest(comp_list)
+    return G
+
         
 def clr_plot(ax):
     plt.cla()
@@ -1015,8 +1066,10 @@ if __name__ == '__main__':
     # PKGS = packages
 
     packages=(
-                Package('RCMF2512', 'R1', pos=xy( 2.0, 0.0),),
-                Package('RCMF2512', 'R2', pos=xy(10.0, 5.0)),
+                Package('RCMF2512', 'R1', pos=xy(-5.0, 0.0), rot=90),
+                Package('RCMF2512', 'R2', pos=xy(2.0, 0.5)),
+                Package('RCMF2512', 'R3', pos=xy(10.0, 3.5), rot=90),
+                Package('RCMF2512', 'R4', pos=xy( 1.0, 6.0)),
                 #Package('LPS22DF',  'U1', pos=xy(-0.5, 0.0), rot=0),
                 #Package('LPS22DF',  'U2', pos=xy(-3.0, 0.0), rot=0),
                 # Package('LT4312f',  pos=xy(0.0,  0.0), rot=0),
@@ -1035,18 +1088,18 @@ if __name__ == '__main__':
 
     clr_plot(ax)
     draw_packages(ax, packages)
-    i = 0
-    moved_history = {}
-    print('starting')
-    while (i < 100):
-        xsect = packages_intersect(packages) 
-        if not xsect: break
-        moved_history = separate_packages3(ax, xsect, moved_history)
-        clr_plot(ax)
-        draw_packages(ax, packages)
-        i += 1
+    # i = 0
+    # moved_history = {}
+    # print('starting')
+    # while (i < 100):
+    #     xsect = packages_intersect(packages) 
+    #     if not xsect: break
+    #     moved_history = separate_packages3(ax, xsect, moved_history)
+    #     clr_plot(ax)
+    #     draw_packages(ax, packages)
+    #     i += 1
         
-    sorted_packages = shadow(packages)
+    G = shadow(packages)
     # print([p['package'].refdes for p in sorted_packages])
     # print('done spreading',i)
 
