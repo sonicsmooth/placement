@@ -1009,6 +1009,34 @@ def cleanup_intervals(I: list):
     accout.append((ffirst(group), flast(group)))
     return accout
 
+def trim_intervals(I, bottom, top):
+    # Trim any tuple within I that is < bottom or > top
+    # Assumes elements within each tuple are sorted
+    # Try not to create a zero-length interval
+    # zero-length intervals within top and bottom will 
+    # be filtered out at the end
+    if not I: return []
+    out = []
+    for i in I:
+        if second(i) <= bottom:
+            continue
+        elif first(i) < bottom and second(i) > bottom:
+            out.append((bottom, second(i)))
+        elif first(i) >= bottom and second(i) <= top:
+            out.append(i)
+        elif first(i) < top and second(i) > top:
+            out.append((first(i), top))
+        elif first(i) >= top:
+            continue
+    # Remove zero-length intervals
+    cleanout = [i for i in out if (second(i) > first(i))]
+    return cleanout
+
+#I = [(0,0), (1,1), (1,1.9), (1, 2), (1,2.1), (2,2), (2,3), (2,5), (3,3),(3,5),(3,6),(5,5),(5,6),(6,6),(6,7)]
+#I = [(3,6),(5,5),(5,6),(6,6),(6,7)]
+#ti = trim_intervals(I, 2, 5)
+
+
 def intervals_length(I: list):
     # Return total length of intervals in list,
     # aka distance between spans without minus the gaps
@@ -1042,7 +1070,8 @@ def shadow(packages, direction='leftright') -> Graph:
             curr_comp = inner_comp_list.pop(0)
             Ii = left_edge(curr_comp)
             if in_range(Ii, top, bottom):
-                Iprime = cleanup_intervals(I + [Ii])
+                Iprime = trim_intervals(I+[Ii], bottom, top)
+                Iprime = cleanup_intervals(Iprime)
                 if Iprime != I:
                     G.add_connections([(component.refdes, curr_comp.refdes)])
                     I = Iprime
@@ -1066,10 +1095,10 @@ if __name__ == '__main__':
     # PKGS = packages
 
     packages=(
-                Package('RCMF2512', 'R1', pos=xy(-5.0, 0.0), rot=90),
-                Package('RCMF2512', 'R2', pos=xy(2.0, 0.5)),
-                Package('RCMF2512', 'R3', pos=xy(10.0, 3.5), rot=90),
-                Package('RCMF2512', 'R4', pos=xy( 1.0, 6.0)),
+                Package('RCMF2512', 'R1', pos=xy(-5.0, 5.0), rot=90),
+                Package('RCMF2512', 'R2', pos=xy(-1, 0.5),  rot=90),
+                Package('RCMF2512', 'R3', pos=xy(3, 7), rot=0),
+                #Package('RCMF2512', 'R4', pos=xy( 1.0, 6.0)),
                 #Package('LPS22DF',  'U1', pos=xy(-0.5, 0.0), rot=0),
                 #Package('LPS22DF',  'U2', pos=xy(-3.0, 0.0), rot=0),
                 # Package('LT4312f',  pos=xy(0.0,  0.0), rot=0),
@@ -1100,6 +1129,7 @@ if __name__ == '__main__':
     #     i += 1
         
     G = shadow(packages)
+    print(G)
     # print([p['package'].refdes for p in sorted_packages])
     # print('done spreading',i)
 
