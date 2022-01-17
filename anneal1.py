@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from inspect import stack
+from typing import OrderedDict
 from matplotlib import pyplot as plt
 from matplotlib import patches
 from matplotlib import transforms
@@ -13,7 +14,8 @@ from functools import reduce
 import copy
 from ordered_set_37 import OrderedSet
 import packspecs
-from graph import Graph
+#from graph import Graph
+import networkx as nx
 
 
 def first(x):
@@ -616,7 +618,7 @@ class DragManager:
         clr_plot(self.ax)
         draw_packages(self.ax, self.packages)
         G = shadow(self.packages)
-        print(G)
+        print(G.edges())
 
 
     def on_release(self, event):
@@ -777,7 +779,7 @@ def make_packages_bbox(packages: list) -> Rectangle:
     rlist = (p.bbox for p in packages)
     return reduce(union_box, rlist)
 
-def bbox_intersect(r1: Rectangle, r2: Rectangle) -> bool:
+def bbox_intersect(r1: Rectangle, r2: Rectangle) -> bool or list:
     """Return whether two rectangles intersect.  Only deal with rectangles that have 0,90,-90, 180, etc. rotation
     Algorithm:
     If r1 and r2 both refer to the same rectangle, return False.
@@ -788,10 +790,6 @@ def bbox_intersect(r1: Rectangle, r2: Rectangle) -> bool:
                 |--------| -> false
     anything else -> true for each axis
     """
-    # rot1 = xfrm_to_deg(r1.transform)
-    # rot2 = xfrm_to_deg(r2.transform)
-    # assert(rot1 % 90 == 0)
-    # assert(rot2 % 90 == 0)
 
     if r1 is r2: return False
 
@@ -875,6 +873,7 @@ def packages_intersect(packages: list) -> set or bool:
     result = OrderedSet()
     for p1 in packages:
         for p2 in packages:
+            if p1 is p2: continue
             iter_val = bbox_intersect(p1.bbox, p2.bbox)
             if iter_val: 
                 result.add(p1)
@@ -930,6 +929,44 @@ def separate_packages3(ax, packages: list, moved: dict = {}) -> None:
             pkg2.translate(moved[pkg2][0])
     return moved
 
+def separate_packages4(ax, packages: list) -> None:
+    # Move packages by overlap at the same time
+    # Each package moves by half the sum of its total overlaps
+    total_overlaps = OrderedDict()
+    overlap_pairs = set()
+    for pkg1 in packages:
+        for pkg2 in packages:
+            if pkg1 is pkg2: continue
+            p1 = (pkg1, pkg2)
+            p2 = (pkg2, pkg1)
+            if p1 in overlap_pairs and \
+               p2 in overlap_pairs:
+                continue
+            else:
+                overlap_pairs.add(p1)
+                overlap_pairs.add(p2)
+            ovl = bbox_intersect(pkg1.bbox, pkg2.bbox)
+            if not ovl: continue
+            olist = [o for o in ovl if o]
+            if not olist: continue
+            mv = min(olist)
+            if   ovl[0] == mv: amt = xy(-mv, 0.0)
+            elif ovl[1] == mv: amt = xy( mv, 0.0)
+            elif ovl[2] == mv: amt = xy(0.0, -mv)
+            elif ovl[3] == mv: amt = xy(0.0,  mv)
+            amt = amt * 0.5
+            if pkg1 in total_overlaps:
+                total_overlaps[pkg1] = total_overlaps[pkg1] - amt
+            else:
+                total_overlaps[pkg1] = amt * (-1.0)
+            if pkg2 in total_overlaps:
+                total_overlaps[pkg2] = total_overlaps[pkg2] + amt
+            else:
+                total_overlaps[pkg2] = amt
+ 
+    for pkg,amt in total_overlaps.items():
+        pkg.translate(amt)
+
 def compact_packages(packages: list)-> None:
     # Move packages by attractive springs (proportional to distance)
     # Moving by attractive gravity (proportional to 1/distance ^2) wasn't as well behaved
@@ -954,24 +991,14 @@ def compact_packages(packages: list)-> None:
         totalxlate = totalxlate + xlate.mag()
     return totalxlate
 
-def overlap(spana: tuple, spanb: tuple) -> bool:
-    # Returns true if any part of span a overlaps with any part of span b
-    # For spans to clear, the edges must be >, etc., not >=
-    # This is similar to the bounding box routine
-    # Assumes the [0]th element is always <= [1]th element
-    if spana[1] < spanb[0]: return False
-    if spana[0] > spanb[1]: return False
-    return True
-
 def cleanup_intervals(I: list):
-    # Return event edges and total number of active
-    # events after each edge.
+    # Return merged intervals
     # eg:
     # 1  2  3  4  5  6  7  8  9  10  11  12  13
     #    |-----------|        |------|
     #       |-----------|            |---|
-    # print(cleanup_intervals([(2,6),(9,11),(3,7),(11,12)      ])) # returns [(2, 7), (9, 12)]
-    # print(cleanup_intervals([(2,6),(9,11),(3,7),(11,12),(7,9)])) # returns [(2, 12)]
+    # print(cleanup_intervals([(2,6),(9,11),(3,7),      (11,12)])) # returns [(2, 7), (9, 12)]
+    # print(cleanup_intervals([(2,6),(9,11),(3,7),(7,9),(11,12)])) # returns [(2, 12)]
     # print(cleanup_intervals([(1,4),(2,4),(2,4),(5,6),(5,7),(6,7),(9,11),(11,12),(12,13)])) # returns [(1, 4), (5, 7), (9, 13)]
 
     if not I: return []
@@ -1056,12 +1083,12 @@ def in_range(Ii, top, bottom):
     if second(Ii) < bottom: return False
     return True
 
-def shadow(packages, direction='leftright') -> Graph:
+def shadow(packages, direction='leftright') -> nx.Graph:
     # Sort packages by left edge
     sorted_packages = sorted(packages, key=lambda p: p.bbox.leftedge[0].x)
     component = first(sorted_packages)
     comp_list = rest(sorted_packages)
-    G = Graph(directed=True)
+    G = nx.DiGraph()
     while(comp_list):
         inner_comp_list = copy.copy(comp_list)
         I = []
@@ -1073,7 +1100,8 @@ def shadow(packages, direction='leftright') -> Graph:
                 Iprime = trim_intervals(I+[Ii], bottom, top)
                 Iprime = cleanup_intervals(Iprime)
                 if Iprime != I:
-                    G.add_connections([(component.refdes, curr_comp.refdes)])
+                    G.add_node(curr_comp)
+                    G.add_edge(component.refdes, curr_comp.refdes)
                     I = Iprime
         component = first(comp_list)
         comp_list = rest(comp_list)
@@ -1095,9 +1123,9 @@ if __name__ == '__main__':
     # PKGS = packages
 
     packages=(
-                Package('RCMF2512', 'R1', pos=xy(-5.0, 5.0), rot=90),
-                Package('RCMF2512', 'R2', pos=xy(-1, 0.5),  rot=90),
-                Package('RCMF2512', 'R3', pos=xy(3, 7), rot=0),
+                Package('RCMF2512', 'R1', pos=xy(5,  2.25), rot=0),
+                Package('RCMF01005', 'R2', pos=xy( 5, 1.25),  rot=0),
+                #Package('RCMF2512', 'R3', pos=xy( 5, 0), rot=0),
                 #Package('RCMF2512', 'R4', pos=xy( 1.0, 6.0)),
                 #Package('LPS22DF',  'U1', pos=xy(-0.5, 0.0), rot=0),
                 #Package('LPS22DF',  'U2', pos=xy(-3.0, 0.0), rot=0),
@@ -1111,25 +1139,27 @@ if __name__ == '__main__':
 
     ax = plt.axes()
     dm = DragManager(ax)
-    dm.add_packages(packages)
+    #dm.add_packages(packages)
 
     #randomize_packages(packages)
 
     clr_plot(ax)
     draw_packages(ax, packages)
-    # i = 0
-    # moved_history = {}
-    # print('starting')
-    # while (i < 100):
-    #     xsect = packages_intersect(packages) 
-    #     if not xsect: break
-    #     moved_history = separate_packages3(ax, xsect, moved_history)
-    #     clr_plot(ax)
-    #     draw_packages(ax, packages)
-    #     i += 1
+    i = 0
+    moved_history = {}
+    print('starting')
+    while (i < 100):
+        xsect = packages_intersect(packages) 
+        if not xsect: break
+        #moved_history = 
+        separate_packages4(ax, xsect) #, moved_history)
+        clr_plot(ax)
+        draw_packages(ax, packages)
+        i += 1
         
     G = shadow(packages)
-    print(G)
+    print(i)
+    print(G.edges())
     # print([p['package'].refdes for p in sorted_packages])
     # print('done spreading',i)
 
