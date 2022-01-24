@@ -779,6 +779,10 @@ def make_packages_bbox(packages: list) -> Rectangle:
     rlist = (p.bbox for p in packages)
     return reduce(union_box, rlist)
 
+def within(a, b, tol):
+    return abs(a-b) < tol
+
+
 def bbox_intersect(r1: Rectangle, r2: Rectangle) -> bool or list:
     """Return whether two rectangles intersect.  Only deal with rectangles that have 0,90,-90, 180, etc. rotation
     Algorithm:
@@ -791,51 +795,78 @@ def bbox_intersect(r1: Rectangle, r2: Rectangle) -> bool or list:
     anything else -> true for each axis
     """
 
-    if r1 is r2: return False
+    #TODO: What if these are exactly overlapping?
 
+    if r1 is r2: return False
+    tol = 1e-5
     # r1 clears r2 on the left
-    if r1.right <= r2.left: return False
+    if r1.right < r2.left or within(r1.right, r2.left, tol): return False
 
     # r1 clears r2 on the right
-    if r1.left >= r2.right: return False
+    if r1.left > r2.right or within(r1.left, r2.right, tol): return False
 
     # r1 clears r2 on the top
-    if r1.bottom >= r2.top: return False
+    if r1.bottom > r2.top or within(r1.bottom, r2.top, tol): return False
 
     # r1 clears r2 on the bottom
-    if r1.top <= r2.bottom: return False
+    if r1.top < r2.bottom or within(r1.top, r2.bottom, tol): return False
 
     # Some overlap must exist
     # Return the amount of overlap as [left, right, bottom, top]
     # where the value indicates the amount that the given edge of 
     # r1 overlaps into r2.
     
+    tol = 1e-5
     retval = []
-    # left edge of r1 inside r2
-    if r2.left < r1.left < r2.right:
-        retval.append(r2.right - r1.left) # a positive number
-    else:
-        retval.append(None)
-    
-    # right edge of r1 inside r2
-    if r2.left < r1.right < r2.right:
-        retval.append(r1.right - r2.left)
-    else:
-        retval.append(None)
-
-    # bottom edge of r1 inside r2
-    if r2.bottom < r1.bottom < r2.top:
-        retval.append(r2.top - r1.bottom)
+    # left edge of r1 inside r2 or right edge of r2 inside r1
+    if r2.left < r1.left < r2.right or \
+        r1.left < r2.right < r1.right:
+        diff = r2.right - r1.left
+        if diff > tol:
+            retval.append(diff) # a positive number
+        else:
+            retval.append(None)
     else:
         retval.append(None)
 
-    # top edge of r1 inside r2
-    if r2.bottom < r1.top < r2.top:
-        retval.append(r1.top - r2.bottom)
+    # right edge of r1 inside r2 or left edge of r2 inside r1
+    if r2.left < r1.right < r2.right or \
+        r1.left < r2.left < r1.right:
+        diff = r2.right - r1.left
+        if diff > tol:
+            retval.append(diff)
+        else:
+            retval.append(None)
+    else:
+        retval.append(None)
+
+    # bottom edge of r1 inside r2 or top edge of r2 inside r1
+    if r2.bottom < r1.bottom < r2.top or \
+        r1.bottom < r2.top < r1.top:
+        diff = r2.top - r1.bottom
+        if diff > tol:
+            retval.append(diff)
+        else:
+            retval.append(None)
+    else:
+        retval.append(None)
+
+    # top edge of r1 inside r2 or bottom edge of r2 inside r1
+    if r2.bottom < r1.top < r2.top or \
+        r1.bottom < r2.bottom < r1.top:
+        diff = r1.top - r2.bottom
+        if diff > tol:
+            retval.append(diff)
+        else:
+            retval.append(None)
     else:
         retval.append(None)
 
     return retval
+
+# r1 = Rectangle(0,0,5,5) #big
+# r2 = Rectangle(1,1,2,2)
+# ovl = bbox_intersect(r1, r2)
 
 def make_packages(qty=1):
     """Generate random packages.  Return iterable"""
@@ -856,9 +887,13 @@ def make_packages(qty=1):
     return plist
 
 def randomize_packages(packages: list) -> None:
+    rots = [0,90,180,270]
     for p in packages:
         rx = random.uniform(-1, 1)
         ry = random.uniform(-1, 1)
+        rot = random.sample(rots,1)[0]
+        p.translate_to(xy(0.0, 0.0))
+        p.rotate(rot)
         p.translate_to(xy(rx, ry))
 
 def draw_packages(ax: plt.Axes, packages: list) -> None:
@@ -947,14 +982,14 @@ def separate_packages4(ax, packages: list) -> None:
                 overlap_pairs.add(p2)
             ovl = bbox_intersect(pkg1.bbox, pkg2.bbox)
             if not ovl: continue
-            olist = [o for o in ovl if o]
+            olist = [o for o in ovl if o] # Remove Nones
             if not olist: continue
             mv = min(olist)
             if   ovl[0] == mv: amt = xy(-mv, 0.0)
             elif ovl[1] == mv: amt = xy( mv, 0.0)
             elif ovl[2] == mv: amt = xy(0.0, -mv)
             elif ovl[3] == mv: amt = xy(0.0,  mv)
-            amt = amt * 0.5
+            amt = amt * 0.55
             if pkg1 in total_overlaps:
                 total_overlaps[pkg1] = total_overlaps[pkg1] - amt
             else:
@@ -1124,7 +1159,8 @@ if __name__ == '__main__':
 
     packages=(
                 Package('RCMF2512', 'R1', pos=xy(5,  2.25), rot=0),
-                Package('RCMF01005', 'R2', pos=xy( 5, 1.25),  rot=0),
+                Package('RCMF2512', 'R1', pos=xy(5,  2.25), rot=0),
+                #Package('RCMF01005', 'R2', pos=xy( 5, 1.25),  rot=0),
                 #Package('RCMF2512', 'R3', pos=xy( 5, 0), rot=0),
                 #Package('RCMF2512', 'R4', pos=xy( 1.0, 6.0)),
                 #Package('LPS22DF',  'U1', pos=xy(-0.5, 0.0), rot=0),
@@ -1135,13 +1171,13 @@ if __name__ == '__main__':
                 # Package('SX9376',  pos=xy(2.5,   0.0), rot=0),
                 # Package('SLG51001',  pos=xy(2.5,   0.0), rot=0),
                 )
-    #packages = make_packages(10)
+    packages = make_packages(20)
 
     ax = plt.axes()
     dm = DragManager(ax)
-    #dm.add_packages(packages)
+    dm.add_packages(packages)
 
-    #randomize_packages(packages)
+    randomize_packages(packages)
 
     clr_plot(ax)
     draw_packages(ax, packages)
